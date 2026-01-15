@@ -36,8 +36,8 @@
         grid-template-columns: repeat(2, 1fr);
     }
     
-    .projects-grid {
-        grid-template-columns: repeat(2, 1fr);
+    .project-card {
+        width: 480px;
     }
 }
 
@@ -56,8 +56,8 @@
         height: 350px;
     }
     
-    .projects-grid {
-        grid-template-columns: repeat(3, 1fr);
+    .project-card {
+        width: 520px;
     }
 }
 
@@ -185,12 +185,15 @@
         grid-template-columns: 1fr;
     }
     
-    .projects-grid {
-        grid-template-columns: 1fr;
+    .project-card {
+        width: 340px;
+        padding: var(--spacing-lg);
     }
     
-    .project-card {
-        padding: var(--spacing-xl);
+    .projects-grid {
+        margin: 0 calc(-1 * var(--spacing-md));
+        padding-left: var(--spacing-md);
+        padding-right: var(--spacing-md);
     }
     
     .social-links {
@@ -253,6 +256,7 @@
     
     .project-card {
         padding: var(--spacing-lg);
+        width: 300px;
     }
     
     section {
