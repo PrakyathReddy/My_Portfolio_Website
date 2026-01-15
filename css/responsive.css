@@ -1,4 +1,4 @@
-/* Responsive Design - Mobile First Approach */
+/* Responsive Design - Apple-inspired Mobile First Approach */
 
 /* Base styles are mobile-first (320px and up) */
 
@@ -7,35 +7,19 @@
     .container {
         padding: 0 var(--spacing-lg);
     }
-    
-    .hero-actions {
-        flex-direction: row;
-    }
-    
-    .btn {
-        padding: var(--spacing-md) var(--spacing-xl);
-    }
 }
 
 /* Medium devices (tablets, 768px and up) */
 @media (min-width: 768px) {
     :root {
+        --font-size-5xl: 4rem;
         --font-size-4xl: 3rem;
         --font-size-3xl: 2.25rem;
-        --font-size-2xl: 1.875rem;
+        --font-size-2xl: 1.75rem;
     }
     
     .container {
         padding: 0 var(--spacing-xl);
-    }
-    
-    .navigation {
-        padding: var(--spacing-lg) var(--spacing-xl);
-    }
-    
-    .hero-content {
-        grid-template-columns: 1fr 1fr;
-        gap: var(--spacing-3xl);
     }
     
     .hero-title {
@@ -43,14 +27,8 @@
     }
     
     .profile-image {
-        width: 350px;
-        height: 350px;
-    }
-    
-    .about-content {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--spacing-2xl);
+        width: 320px;
+        height: 320px;
     }
     
     .skills-list,
@@ -61,72 +39,32 @@
     .projects-grid {
         grid-template-columns: repeat(2, 1fr);
     }
-    
-    .social-links {
-        gap: var(--spacing-2xl);
-    }
 }
 
 /* Large devices (desktops, 992px and up) */
 @media (min-width: 992px) {
-    .container {
-        padding: 0 var(--spacing-2xl);
+    :root {
+        --font-size-5xl: 4.5rem;
     }
     
-    .hero {
-        padding: var(--spacing-3xl) 0 4rem;
-    }
-    
-    .hero-content {
-        gap: 4rem;
+    .hero-title {
+        font-size: var(--font-size-5xl);
     }
     
     .profile-image {
-        width: 400px;
-        height: 400px;
-    }
-    
-    .about-content {
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        gap: var(--spacing-3xl);
-        align-items: start;
-    }
-    
-    .skills,
-    .achievements {
-        margin-bottom: var(--spacing-2xl);
+        width: 350px;
+        height: 350px;
     }
     
     .projects-grid {
         grid-template-columns: repeat(3, 1fr);
     }
-    
-    .project-card {
-        padding: var(--spacing-2xl);
-    }
 }
 
 /* Extra large devices (large desktops, 1200px and up) */
 @media (min-width: 1200px) {
-    :root {
-        --font-size-4xl: 3.5rem;
-    }
-    
     .hero {
-        padding: 5rem 0;
-    }
-    
-    .hero-content {
-        gap: 5rem;
-    }
-    
-    .section-title {
-        margin-bottom: 3rem;
-    }
-    
-    section {
-        padding: 5rem 0;
+        padding: var(--spacing-4xl) 0 var(--spacing-4xl);
     }
 }
 
@@ -134,19 +72,20 @@
 @media (max-width: 767px) {
     .nav-menu {
         position: fixed;
-        top: 100%;
+        top: 44px;
         left: 0;
         right: 0;
-        background-color: var(--background-primary);
-        border-top: 1px solid var(--border-color);
+        background-color: rgba(255, 255, 255, 0.95);
+        backdrop-filter: saturate(180%) blur(20px);
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
         flex-direction: column;
-        padding: var(--spacing-lg);
-        gap: var(--spacing-lg);
+        padding: var(--spacing-md);
+        gap: 0;
         transform: translateY(-100%);
         opacity: 0;
         visibility: hidden;
         transition: all var(--transition-normal);
-        box-shadow: var(--shadow-lg);
+        box-shadow: var(--shadow-md);
     }
     
     .nav-menu.active {
@@ -155,12 +94,27 @@
         visibility: visible;
     }
     
+    .nav-item {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        padding: var(--spacing-md) 0;
+    }
+    
+    .nav-item:last-child {
+        border-bottom: none;
+    }
+    
+    .nav-link {
+        display: block;
+        padding: var(--spacing-xs) 0;
+        font-size: var(--font-size-base);
+    }
+    
     .nav-toggle {
         display: flex;
     }
     
     .nav-toggle.active .hamburger-line:nth-child(1) {
-        transform: rotate(45deg) translate(5px, 5px);
+        transform: rotate(45deg) translate(4px, 4px);
     }
     
     .nav-toggle.active .hamburger-line:nth-child(2) {
@@ -168,33 +122,62 @@
     }
     
     .nav-toggle.active .hamburger-line:nth-child(3) {
-        transform: rotate(-45deg) translate(7px, -6px);
+        transform: rotate(-45deg) translate(5px, -5px);
+    }
+    
+    .hero {
+        padding: var(--spacing-3xl) 0;
     }
     
     .hero-content {
         grid-template-columns: 1fr;
-        text-align: center;
         gap: var(--spacing-2xl);
     }
     
+    .hero-text {
+        text-align: center;
+        order: 2;
+    }
+    
     .hero-image {
-        order: -1;
+        order: 1;
+    }
+    
+    .hero-title {
+        font-size: var(--font-size-3xl);
+    }
+    
+    .hero-description {
+        font-size: var(--font-size-lg);
     }
     
     .profile-image {
-        width: 250px;
-        height: 250px;
+        width: 240px;
+        height: 240px;
     }
     
     .hero-actions {
         flex-direction: column;
+        width: 100%;
         align-items: center;
-        gap: var(--spacing-md);
     }
     
     .btn {
         width: 100%;
-        max-width: 280px;
+        max-width: 320px;
+    }
+    
+    .section-title {
+        font-size: var(--font-size-3xl);
+    }
+    
+    .about-summary {
+        font-size: var(--font-size-lg);
+    }
+    
+    .skills-title,
+    .achievements-title {
+        font-size: var(--font-size-xl);
     }
     
     .skills-list,
@@ -206,24 +189,20 @@
         grid-template-columns: 1fr;
     }
     
-    .project-technologies {
-        justify-content: center;
-    }
-    
-    .project-links {
-        justify-content: center;
+    .project-card {
+        padding: var(--spacing-xl);
     }
     
     .social-links {
         flex-direction: column;
-        align-items: center;
-        gap: var(--spacing-md);
+        width: 100%;
+        align-items: stretch;
     }
     
     .social-link {
         width: 100%;
-        max-width: 200px;
-        text-align: center;
+        max-width: 320px;
+        margin: 0 auto;
     }
     
     .footer-content {
@@ -236,9 +215,10 @@
 /* Small mobile devices (up to 480px) */
 @media (max-width: 480px) {
     :root {
-        --font-size-4xl: 2rem;
-        --font-size-3xl: 1.75rem;
+        --font-size-3xl: 2rem;
         --font-size-2xl: 1.5rem;
+        --font-size-xl: 1.25rem;
+        --spacing-4xl: 3rem;
         --spacing-3xl: 2rem;
     }
     
@@ -246,12 +226,16 @@
         padding: 0 var(--spacing-md);
     }
     
-    .navigation {
-        padding: var(--spacing-md);
-    }
-    
     .hero {
         padding: var(--spacing-2xl) 0;
+    }
+    
+    .hero-title {
+        font-size: var(--font-size-2xl);
+    }
+    
+    .hero-description {
+        font-size: var(--font-size-base);
     }
     
     .profile-image {
@@ -259,30 +243,20 @@
         height: 200px;
     }
     
+    .section-title {
+        font-size: var(--font-size-2xl);
+    }
+    
+    .about-summary {
+        font-size: var(--font-size-base);
+    }
+    
     .project-card {
         padding: var(--spacing-lg);
     }
     
-    .project-technologies {
-        gap: var(--spacing-xs);
-    }
-    
-    .tech-tag {
-        font-size: var(--font-size-xs);
-        padding: 2px var(--spacing-xs);
-    }
-    
     section {
-        padding: var(--spacing-2xl) 0;
-    }
-}
-
-/* High DPI displays */
-@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
-    /* Optimize for retina displays */
-    body {
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
+        padding: var(--spacing-3xl) 0;
     }
 }
 
@@ -302,12 +276,6 @@
     }
 }
 
-/* Dark mode support (if needed in future) */
-@media (prefers-color-scheme: dark) {
-    /* Dark mode styles can be added here */
-    /* Currently using light theme only */
-}
-
 /* Print styles */
 @media print {
     .nav-toggle,
@@ -317,7 +285,7 @@
     
     .header {
         position: static;
-        box-shadow: none;
+        background: white;
         border-bottom: 1px solid #000;
     }
     
@@ -330,8 +298,7 @@
         padding: var(--spacing-lg) 0;
     }
     
-    .project-card,
-    .card {
+    .project-card {
         box-shadow: none;
         border: 1px solid #ccc;
         break-inside: avoid;
@@ -340,24 +307,6 @@
     a {
         color: #000;
         text-decoration: underline;
-    }
-    
-    .btn {
-        border: 1px solid #000;
-        background: none;
-        color: #000;
-    }
-}
-
-/* Focus styles for accessibility */
-@media (prefers-reduced-motion: no-preference) {
-    .nav-link:focus,
-    .btn:focus,
-    .social-link:focus,
-    .project-link:focus {
-        outline: 2px solid var(--primary-color);
-        outline-offset: 2px;
-        transition: outline-offset var(--transition-fast);
     }
 }
 
@@ -370,9 +319,5 @@
     .profile-image {
         width: 180px;
         height: 180px;
-    }
-    
-    .hero-content {
-        gap: var(--spacing-lg);
     }
 }
