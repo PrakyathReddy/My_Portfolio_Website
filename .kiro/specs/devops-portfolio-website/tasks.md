@@ -13,7 +13,7 @@ Implementation of a modern, responsive static portfolio website using vanilla HT
   - Set up JavaScript modules (main.js, navigation.js, animations.js)
   - _Requirements: 4.1, 5.2_
 
-- [ ] 1.1 Write unit tests for project structure
+- [x] 1.1 Write unit tests for project structure
   - Test that required directories and files exist
   - Verify HTML5 semantic structure is present
   - _Requirements: 4.1, 5.2_
