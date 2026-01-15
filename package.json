@@ -8,14 +8,19 @@
     "test:watch": "jest --watch"
   },
   "devDependencies": {
+    "fast-check": "^4.5.3",
     "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0"
+    "jest-environment-jsdom": "^29.7.0",
+    "jsdom": "^27.4.0"
   },
   "jest": {
     "testEnvironment": "jsdom",
     "testMatch": [
       "**/__tests__/**/*.js",
       "**/?(*.)+(spec|test).js"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@exodus/bytes|html-encoding-sniffer)/)"
     ]
   }
 }
