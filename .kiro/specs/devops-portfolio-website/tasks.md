@@ -6,14 +6,14 @@ Implementation of a modern, responsive static portfolio website using vanilla HT
 
 ## Tasks
 
-- [ ] 1. Set up project structure and base files
+- [x] 1. Set up project structure and base files
   - Create directory structure (css/, js/, images/, assets/)
   - Create index.html with semantic HTML5 structure
   - Set up base CSS files (main.css, components.css, responsive.css)
   - Set up JavaScript modules (main.js, navigation.js, animations.js)
   - _Requirements: 4.1, 5.2_
 
-- [ ]* 1.1 Write unit tests for project structure
+- [ ] 1.1 Write unit tests for project structure
   - Test that required directories and files exist
   - Verify HTML5 semantic structure is present
   - _Requirements: 4.1, 5.2_
