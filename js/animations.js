@@ -366,7 +366,7 @@ const Animations = {
     },
     
     // Handle app resize events
-    handleAppResize(dimensions) {
+    handleAppResize() {
         // Recalculate animation positions if needed
         this.recalculateAnimations();
     },
@@ -406,9 +406,10 @@ const Animations = {
     },
     
     // Update scroll-based animations
-    updateScrollAnimations(scrollY) {
+    updateScrollAnimations() {
         // Implement additional scroll-based animations here
         // This is called on scroll events
+        // Currently no additional scroll animations needed
     },
     
     // Recalculate animations (on resize)

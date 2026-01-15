@@ -1,0 +1,13 @@
+# Project Images
+
+Place optimized project screenshots and thumbnails here.
+
+## Optimization Guidelines:
+- Format: WebP (with JPEG/PNG fallback)
+- Max dimensions: 1200x800px for screenshots
+- Compression: 75-80% quality
+- File size target: < 150KB per image
+
+## Naming Convention:
+- project-name-screenshot.webp
+- project-name-thumbnail.webp

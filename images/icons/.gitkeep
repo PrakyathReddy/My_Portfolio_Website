@@ -1,0 +1,13 @@
+# Icon Images
+
+Place optimized icon images here.
+
+## Optimization Guidelines:
+- Format: SVG (preferred) or PNG
+- Max dimensions: 64x64px for icons
+- Use inline SVG when possible for better performance
+- File size target: < 5KB per icon
+
+## Required Icons:
+- Social media icons (LinkedIn, GitHub, etc.)
+- Technology icons for skills section

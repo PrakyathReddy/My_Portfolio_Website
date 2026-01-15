@@ -1,0 +1,12 @@
+# Profile Images
+
+Place optimized profile images here.
+
+## Optimization Guidelines:
+- Format: WebP (with JPEG fallback)
+- Max dimensions: 800x800px for profile photos
+- Compression: 80-85% quality
+- File size target: < 100KB per image
+
+## Required Images:
+- headshot.jpg (or headshot.webp) - Professional headshot for hero section
