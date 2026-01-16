@@ -12,3 +12,5 @@ This project leverages:
 
 - Original CloudFront URL after setting up the distribution: https://d2tavlqvuofhhp.cloudfront.net/
 
+## Security features
+- Disabled public access of S3 endpoint which uses http endpoint. Disabled static website hosting. Switched from S3 Website Endpoint to S3 Bucket REST Endpoint using Origin Access Control (OAC)
