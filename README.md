@@ -15,4 +15,6 @@ This project leverages:
 ## Security features
 - Disabled public access of S3 endpoint which uses http endpoint. Disabled static website hosting. Switched from S3 Website Endpoint to S3 Bucket REST Endpoint using Origin Access Control (OAC)
 
-- Purchased prakyath.dev domain from namecheap.com
+- Purchased prakyath.dev domain from namecheap.com and configured to use AWS Hosted Zone
+- Requested SSL Certificate on Certificate Manager (ACM)
+- prakyath.dev successfully configured. https://d2tavlqvuofhhp.cloudfront.net/ now redirects to my custom domain - prakyath.dev
