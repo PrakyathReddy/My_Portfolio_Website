@@ -18,3 +18,6 @@ This project leverages:
 - Purchased prakyath.dev domain from namecheap.com and configured to use AWS Hosted Zone
 - Requested SSL Certificate on Certificate Manager (ACM)
 - prakyath.dev successfully configured. https://d2tavlqvuofhhp.cloudfront.net/ now redirects to my custom domain - prakyath.dev
+
+## Add on's
+- Add a feature to track the number of visitors to my site
