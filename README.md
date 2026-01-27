@@ -20,5 +20,8 @@ This project leverages:
 - Requested SSL Certificate on Certificate Manager (ACM)
 - prakyath.dev successfully configured. https://d2tavlqvuofhhp.cloudfront.net/ now redirects to my custom domain - prakyath.dev
 
-## Add on's
+## in the pipeline
 - Add a feature to track the number of visitors to my site
+- improve website performance: https://pagespeed.web.dev/
+- re-write using Astro
+- use SEO to improve search results on google
