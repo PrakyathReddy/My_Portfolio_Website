@@ -216,16 +216,28 @@ Resources:
         AllowHeaders: [content-type, authorization]
         MaxAge: 86400
 
+  # Two permissions, not one. Since October 2025 a newly created function URL
+  # needs lambda:InvokeFunction as well as lambda:InvokeFunctionUrl; with only
+  # the latter the URL answers a bare "Forbidden" before the handler runs, so
+  # nothing appears in CloudWatch. Both are scoped by FunctionUrlAuthType so
+  # they apply to function-URL invocations only, not to arbitrary callers.
   ApiUrlPermission:
     Type: AWS::Lambda::Permission
     # Explicit ordering: without it CloudFormation may create the permission
-    # before the URL exists. The stack still reports CREATE_COMPLETE either
-    # way, but the URL can end up answering a bare "Forbidden" that never
-    # reaches the handler and so leaves no trace in CloudWatch.
+    # before the URL exists. The stack reports CREATE_COMPLETE either way.
     DependsOn: ApiUrl
     Properties:
       FunctionName: !Ref ApiFunction
       Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  ApiUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: ApiUrl
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
       Principal: '*'
       FunctionUrlAuthType: NONE
 

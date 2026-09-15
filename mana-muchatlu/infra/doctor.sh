@@ -180,6 +180,35 @@ if policy="$(aws lambda get-policy --region "$AWS_REGION" \
     });
     good ? "yes" : "no";
   ')"
+  # Since October 2025 a new function URL needs lambda:InvokeFunction too.
+  # Granting only InvokeFunctionUrl produces a Forbidden with empty logs.
+  invoke_fn_ok="$(printf '%s' "$policy" | node -pe '
+    const raw = require("fs").readFileSync(0, "utf8");
+    let doc;
+    try { doc = JSON.parse(raw); } catch (e) { console.log("no"); process.exit(0); }
+    const statements = [].concat(doc.Statement || []);
+    const good = statements.some((s) => {
+      const actions = [].concat(s.Action || []);
+      const authType = ((s.Condition || {}).StringEquals || {})["lambda:FunctionUrlAuthType"];
+      return s.Effect === "Allow"
+        && actions.includes("lambda:InvokeFunction")
+        && authType === "NONE";
+    });
+    good ? "yes" : "no";
+  ')"
+  if [ "$invoke_fn_ok" = "yes" ]; then
+    pass "resource policy allows public InvokeFunction"
+  else
+    fail "resource policy is missing lambda:InvokeFunction"
+    note "function URLs created after October 2025 need both InvokeFunctionUrl"
+    note "and InvokeFunction; with only the first the URL returns Forbidden"
+    note "before the handler runs, so CloudWatch shows nothing."
+    note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
+    note "       --statement-id FunctionUrlPublicInvoke \\"
+    note "       --action lambda:InvokeFunction --principal '*' \\"
+    note "       --function-url-auth-type NONE"
+  fi
+
   if [ "$invoke_ok" = "yes" ]; then
     pass "resource policy allows public InvokeFunctionUrl"
   else
@@ -196,6 +225,49 @@ else
   note "       --statement-id FunctionUrlPublicAccess \\"
   note "       --action lambda:InvokeFunctionUrl --principal '*' \\"
   note "       --function-url-auth-type NONE"
+fi
+
+# --- Public access block ------------------------------------------------------
+# This sits ABOVE the resource policy. RestrictPublicResource=true blocks the
+# URL even when the policy allows it, and both settings default to true on
+# functions created since 2025. There is no CloudFormation resource for it, so
+# a perfectly correct template still produces a dead endpoint.
+head_ "Lambda public access block"
+
+fn_arn="$(aws lambda get-function-configuration --region "$AWS_REGION" \
+  --function-name "$fn" --query FunctionArn --output text 2>/dev/null)"
+
+if [ -n "$fn_arn" ] && [ "$fn_arn" != "None" ]; then
+  if pab="$(aws lambda get-public-access-block-config --region "$AWS_REGION" \
+       --resource-arn "$fn_arn" --output json 2>/dev/null)"; then
+    restrict="$(printf '%s' "$pab" | node -pe \
+      'const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+       String(((c.PublicAccessBlockConfig) || c).RestrictPublicResource)')"
+    block_policy="$(printf '%s' "$pab" | node -pe \
+      'const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+       String(((c.PublicAccessBlockConfig) || c).BlockPublicPolicy)')"
+
+    if [ "$restrict" = "false" ]; then
+      pass "RestrictPublicResource is false (the URL may serve the public)"
+    else
+      fail "RestrictPublicResource is ${restrict} - this blocks the URL outright"
+      note "it overrides the resource policy, and the request never reaches"
+      note "your code, so there is nothing in CloudWatch to find."
+      note "fix: aws lambda put-public-access-block-config --region ${AWS_REGION} \\"
+      note "       --resource-arn ${fn_arn} \\"
+      note "       --public-access-block-config BlockPublicPolicy=false,RestrictPublicResource=false"
+    fi
+
+    if [ "$block_policy" = "false" ]; then
+      pass "BlockPublicPolicy is false (public statements may be attached)"
+    else
+      warn "BlockPublicPolicy is ${block_policy} - new public policy statements will be refused"
+    fi
+  else
+    warn "could not read the public access block config"
+    note "if your aws CLI predates late 2024 it will not know this command:"
+    note "  aws --version"
+  fi
 fi
 
 # --- Live endpoints -----------------------------------------------------------

@@ -51,6 +51,42 @@ deploy_data_stack() {
       "AllowedOrigin=https://${DOMAIN_NAME}"
 }
 
+configure_public_access() {
+  # Lambda's public-access block, added by AWS in 2025, sits above the
+  # resource-based policy: with RestrictPublicResource=true the function URL
+  # is blocked even though the policy allows it, and the request is refused
+  # before the handler runs so CloudWatch stays empty. Both settings default
+  # to true on new functions, and there is no CloudFormation resource for
+  # them yet - hence doing it here rather than in the template.
+  #
+  # This is what makes the journal reachable from a browser at all. The
+  # passphrase is the gate; see README for why that is the right trade here.
+  log "Allowing public access to the function URL"
+
+  local fn_arn
+  fn_arn="$(aws lambda get-function-configuration --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-api" --query 'FunctionArn' --output text 2>/dev/null)"
+
+  if [ -z "$fn_arn" ] || [ "$fn_arn" = "None" ]; then
+    echo "  could not resolve the function ARN - is the data stack deployed?"
+    return 1
+  fi
+
+  if ! aws lambda put-public-access-block-config \
+        --region "$AWS_REGION" \
+        --resource-arn "$fn_arn" \
+        --public-access-block-config "BlockPublicPolicy=false,RestrictPublicResource=false" \
+        >/dev/null 2>&1; then
+    echo "  WARNING: put-public-access-block-config failed."
+    echo "  Usually an aws CLI too old to know the command - check with:"
+    echo "    aws --version   (needs a build from late 2024 or newer)"
+    echo "  Without this the function URL returns Forbidden with empty logs."
+    return 1
+  fi
+
+  echo "  public access allowed on ${fn_arn}"
+}
+
 deploy_api_code() {
   log "Packaging API"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
@@ -181,11 +217,13 @@ case "$TARGET" in
   all)
     deploy_data_stack
     deploy_api_code
+    configure_public_access
     deploy_web_stack
     publish_web
     ;;
   api)
     deploy_api_code
+    configure_public_access
     ;;
   web)
     publish_web
