@@ -19,6 +19,15 @@ BUILD_DIR="${ROOT}/.build"
 
 DATA_STACK="${PROJECT_NAME}-data"
 WEB_STACK="${PROJECT_NAME}-web"
+
+# zsh does not strip "#" comments in interactive shells by default, so a
+# pasted `./deploy.sh   # some note` arrives with "#" as argv[1]. Without this
+# the script prints usage and exits, which scrolls past unnoticed and looks
+# exactly like a deploy that ran and changed nothing.
+case "${1:-}" in
+  '#'*) set -- ;;
+esac
+
 TARGET="${1:-all}"
 
 log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -230,7 +239,10 @@ case "$TARGET" in
     publish_web
     ;;
   *)
-    echo "usage: $0 [all|api|web]"
+    echo
+    echo "  Nothing was deployed: '${TARGET}' is not a valid target."
+    echo "  usage: $0 [all|api|web]   (default: all)"
+    echo
     exit 1
     ;;
 esac
