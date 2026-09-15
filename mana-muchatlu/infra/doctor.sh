@@ -39,7 +39,14 @@ stack_status() {
 # --- Prerequisites ------------------------------------------------------------
 head_ "Prerequisites"
 
-if command -v aws >/dev/null; then pass "aws CLI found"; else fail "aws CLI not installed"; exit 1; fi
+if command -v aws >/dev/null; then
+  pass "aws CLI found: $(aws --version 2>&1 | head -1)"
+  note "an older CLI cannot express some newer Lambda settings directly, but"
+  note "./deploy.sh routes those through CloudFormation, which applies them"
+  note "server-side regardless of CLI version"
+else
+  fail "aws CLI not installed"; exit 1
+fi
 
 if account="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)"; then
   pass "AWS credentials valid (account ${account}, region ${AWS_REGION})"
@@ -211,13 +218,17 @@ if policy="$(aws lambda get-policy --region "$AWS_REGION" \
       note "function URLs created after October 2025 need both InvokeFunctionUrl"
       note "and InvokeFunction; with only the first the URL returns Forbidden"
       note "before the handler runs, so CloudWatch shows nothing."
-      note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
-      note "       --statement-id FunctionUrlPublicInvoke \\"
-      note "       --action lambda:InvokeFunction --principal '*' \\"
-      note "       --invoked-via-function-url"
-      note "(--invoked-via-function-url, NOT --function-url-auth-type: that flag"
-      note " is only valid on lambda:InvokeFunctionUrl. Needs a recent aws CLI;"
-      note " if it is rejected as unknown, upgrade the CLI first.)"
+      note ""
+      note "fix: ./deploy.sh"
+      note "  The template grants it. CloudFormation applies the property"
+      note "  server-side, so this works even on an aws CLI too old to express"
+      note "  the permission itself."
+      note ""
+      note "or, directly, on a recent enough CLI:"
+      note "  aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
+      note "    --statement-id FunctionUrlPublicInvoke \\"
+      note "    --action lambda:InvokeFunction --principal '*' \\"
+      note "    --invoked-via-function-url"
       ;;
   esac
 
