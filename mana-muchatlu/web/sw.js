@@ -86,6 +86,10 @@ self.addEventListener('fetch', function (event) {
   // config.js carries the API endpoint and is generated at deploy time.
   // A stale copy would point the app at the wrong backend.
   if (url.pathname === '/config.js') return;
+  // The API is cross-origin in production and already skipped above, but the
+  // dev server is same-origin. Entries and photos must never be served from a
+  // cache: a stale entry would misreport what your partner wrote.
+  if (url.pathname.indexOf('/api/') === 0) return;
 
   if (url.pathname.indexOf('/icons/') === 0 || url.pathname === '/manifest.webmanifest') {
     event.respondWith(cacheFirst(request, ASSET_CACHE));

@@ -16,11 +16,13 @@
 
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
 const auth = require('../api/lib/auth');
 const entries = require('../api/lib/entries');
+const mediaLib = require('../api/lib/media');
 
 const PORT = Number(process.env.PORT || 4173);
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -38,6 +40,17 @@ const MEMBERS = auth.parseMembers(JSON.stringify([
 /** sortKey -> item. Mirrors the single-table layout, minus the network. */
 const table = new Map();
 
+/**
+ * Local stand-in for the media bucket.
+ *
+ * Production hands the browser a presigned S3 PUT; here the upload url points
+ * back at this server and the bytes land in a temp directory. The browser code
+ * cannot tell the difference - it presigns, PUTs to whatever url it was given,
+ * then saves the key - which is the point: the whole photo flow is exercised
+ * locally, with no AWS and no credentials.
+ */
+const MEDIA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-media-'));
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -47,6 +60,13 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.txt': 'text/plain; charset=utf-8',
+  // Uploaded photos are served back from MEDIA_DIR by extension.
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
 };
 
 function send(res, status, body, headers) {
@@ -117,6 +137,7 @@ async function handleApi(req, res, url) {
     const found = [...table.values()]
       .filter((item) => entries.entrySortKey(item.date, item.entryId).startsWith(prefix))
       .map(entries.toPublicEntry)
+      .map(withLocalMediaUrls)
       .sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : b.date.localeCompare(a.date)));
 
     return sendJson(res, 200, {
@@ -133,15 +154,80 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     if (!body) return sendJson(res, 400, { error: 'body was not valid JSON' });
 
-    const check = entries.validateEntry(body);
+    const mediaCheck = mediaLib.validateMedia(body.media, 'mana');
+    if (!mediaCheck.ok) return sendJson(res, 400, { error: mediaCheck.errors[0] });
+
+    const check = entries.validateEntry(body, { hasMedia: mediaCheck.value.length > 0 });
     if (!check.ok) return sendJson(res, 400, { error: check.errors[0] });
 
     const entryId = crypto.randomUUID();
     const item = entries.buildEntryItem({
-      coupleId: 'mana', entryId, author: member.id, value: check.value, now: Date.now(),
+      coupleId: 'mana', entryId, author: member.id, value: check.value,
+      media: mediaCheck.value, now: Date.now(),
     });
     table.set(item.sk, item);
-    return sendJson(res, 201, { entry: entries.toPublicEntry(item) });
+    return sendJson(res, 201, { entry: withLocalMediaUrls(entries.toPublicEntry(item)) });
+  }
+
+  if (req.method === 'POST' && p === '/api/media/presign') {
+    if (!requireSession(req, res)) return undefined;
+
+    const body = await readBody(req);
+    if (!body) return sendJson(res, 400, { error: 'body was not valid JSON' });
+
+    const check = mediaLib.validatePresignRequest(body);
+    if (!check.ok) return sendJson(res, 400, { error: check.errors[0] });
+
+    const month = entries.normalizeMonth(body.month) || new Date().toISOString().slice(0, 7);
+    const key = mediaLib.buildMediaKey({
+      coupleId: 'mana',
+      month,
+      id: crypto.randomUUID(),
+      contentType: check.value.contentType,
+    });
+
+    return sendJson(res, 200, {
+      key,
+      uploadUrl: `/api/media/blob?key=${encodeURIComponent(key)}`,
+      method: 'PUT',
+      contentType: check.value.contentType,
+      expiresIn: 900,
+    });
+  }
+
+  if (p === '/api/media/blob') {
+    const key = url.searchParams.get('key');
+    if (!mediaLib.isValidMediaKey(key, 'mana')) {
+      return sendJson(res, 400, { error: 'bad media key' });
+    }
+    // Flatten the key so nothing can escape the temp directory on disk.
+    const file = path.join(MEDIA_DIR, key.replace(/\//g, '__'));
+
+    if (req.method === 'PUT') {
+      // Deliberately no session check, mirroring production: there the upload
+      // url is a presigned S3 url, and the browser sends it no Authorization
+      // header - S3 would not accept one. Possession of the signed url IS the
+      // capability. Requiring a bearer token here would make the dev server
+      // accept a flow that S3 rejects, which is worse than useless.
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      return new Promise((resolve) => {
+        req.on('end', () => {
+          fs.writeFileSync(file, Buffer.concat(chunks));
+          send(res, 200, '');
+          resolve(undefined);
+        });
+      });
+    }
+
+    if (req.method === 'GET') {
+      // Deliberately no session check: in production these are presigned urls
+      // loaded by <img>, which cannot carry an Authorization header either.
+      if (!fs.existsSync(file)) return sendJson(res, 404, { error: 'not found' });
+      return send(res, 200, fs.readFileSync(file), {
+        'content-type': MIME[path.extname(file)] || 'application/octet-stream',
+      });
+    }
   }
 
   const match = /^\/api\/entries\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9_-]{1,64})$/.exec(p);
@@ -163,7 +249,13 @@ async function handleApi(req, res, url) {
       const body = await readBody(req);
       if (!body) return sendJson(res, 400, { error: 'body was not valid JSON' });
 
-      const check = entries.validateEntry({ ...body, date });
+      const mediaCheck = mediaLib.validateMedia(body.media, 'mana');
+      if (!mediaCheck.ok) return sendJson(res, 400, { error: mediaCheck.errors[0] });
+
+      const check = entries.validateEntry(
+        { ...body, date },
+        { hasMedia: mediaCheck.value.length > 0 }
+      );
       if (!check.ok) return sendJson(res, 400, { error: check.errors[0] });
 
       const updated = {
@@ -171,11 +263,12 @@ async function handleApi(req, res, url) {
         title: check.value.title,
         body: check.value.body,
         mood: check.value.mood,
+        media: mediaCheck.value,
         updatedAt: Date.now(),
         lastEditedBy: member.id,
       };
       table.set(sk, updated);
-      return sendJson(res, 200, { entry: entries.toPublicEntry(updated) });
+      return sendJson(res, 200, { entry: withLocalMediaUrls(entries.toPublicEntry(updated)) });
     }
   }
 
@@ -211,6 +304,18 @@ function serveStatic(req, res, url) {
   });
 }
 
+/** Local equivalent of the presigned GET urls production attaches. */
+function withLocalMediaUrls(entry) {
+  if (!entry || !Array.isArray(entry.media) || entry.media.length === 0) return entry;
+  return {
+    ...entry,
+    media: entry.media.map((item) => ({
+      ...item,
+      url: `/api/media/blob?key=${encodeURIComponent(item.key)}`,
+    })),
+  };
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (url.pathname.startsWith('/api/')) {
@@ -226,5 +331,6 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Mana Muchatlu dev server  ->  http://localhost:${PORT}`);
   console.log(`  members: ${MEMBERS.map((m) => m.id).join(', ')}`);
-  console.log(`  dev passphrase for both: ${DEV_PASSPHRASE}\n`);
+  console.log(`  dev passphrase for both: ${DEV_PASSPHRASE}`);
+  console.log(`  photos land in: ${MEDIA_DIR}\n`);
 });

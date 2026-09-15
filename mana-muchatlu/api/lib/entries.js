@@ -72,7 +72,7 @@ function monthPrefix(month) {
  * Validate and normalize an incoming entry body.
  * Returns { ok, errors, value } - never throws, so the handler stays flat.
  */
-function validateEntry(input, { requireDate = true } = {}) {
+function validateEntry(input, { requireDate = true, hasMedia = false } = {}) {
   const errors = [];
   const src = input && typeof input === 'object' ? input : {};
 
@@ -82,8 +82,11 @@ function validateEntry(input, { requireDate = true } = {}) {
   }
 
   const body = typeof src.body === 'string' ? src.body.trim() : '';
-  if (!body && !title) {
-    errors.push('an entry needs at least a title or some text');
+  // A photo with nothing written is a complete entry. It is also the cheapest
+  // kind to make, and the one most likely to get made at all - so it must not
+  // be rejected as empty.
+  if (!body && !title && !hasMedia) {
+    errors.push('an entry needs a photo, a title, or some text');
   }
   if (body.length > MAX_BODY) {
     errors.push(`body must be ${MAX_BODY} characters or fewer`);
@@ -111,7 +114,7 @@ function validateEntry(input, { requireDate = true } = {}) {
 }
 
 /** Build the full DynamoDB item for a new entry. */
-function buildEntryItem({ coupleId, entryId, author, value, now }) {
+function buildEntryItem({ coupleId, entryId, author, value, now, media = [] }) {
   return {
     pk: partitionKey(coupleId),
     sk: entrySortKey(value.date, entryId),
@@ -120,6 +123,7 @@ function buildEntryItem({ coupleId, entryId, author, value, now }) {
     title: value.title,
     body: value.body,
     mood: value.mood,
+    media,
     author,
     createdAt: now,
     updatedAt: now,
@@ -135,6 +139,7 @@ function toPublicEntry(item) {
     title: item.title || '',
     body: item.body || '',
     mood: item.mood || '',
+    media: Array.isArray(item.media) ? item.media : [],
     author: item.author,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -149,9 +154,10 @@ function summarizeMonth(entries) {
   const summary = {};
   for (const entry of entries || []) {
     if (!entry || !entry.date) continue;
-    if (!summary[entry.date]) summary[entry.date] = { total: 0, authors: [] };
+    if (!summary[entry.date]) summary[entry.date] = { total: 0, authors: [], photos: 0 };
     const day = summary[entry.date];
     day.total += 1;
+    day.photos += Array.isArray(entry.media) ? entry.media.length : 0;
     if (entry.author && !day.authors.includes(entry.author)) {
       day.authors.push(entry.author);
     }

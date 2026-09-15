@@ -105,12 +105,31 @@ describe('validateEntry', () => {
   test('rejects a completely empty entry', () => {
     const result = entries.validateEntry({ date: '2026-09-15' });
     expect(result.ok).toBe(false);
-    expect(result.errors[0]).toMatch(/at least a title or some text/);
+    expect(result.errors[0]).toMatch(/needs a photo, a title, or some text/);
+  });
+
+  test('accepts an entry that is only photos', () => {
+    // The cheapest entry to make, and so the one most likely to get made.
+    const result = entries.validateEntry({ date: '2026-09-15' }, { hasMedia: true });
+    expect(result.ok).toBe(true);
+    expect(result.value.title).toBe('');
+    expect(result.value.body).toBe('');
+  });
+
+  test('still rejects an empty entry with no photos attached', () => {
+    expect(entries.validateEntry({ date: '2026-09-15' }, { hasMedia: false }).ok).toBe(false);
   });
 
   test('treats whitespace-only content as empty', () => {
     const result = entries.validateEntry({ title: '   ', body: '\n\t ', date: '2026-09-15' });
     expect(result.ok).toBe(false);
+  });
+
+  test('whitespace-only text is fine when a photo carries the entry', () => {
+    expect(entries.validateEntry(
+      { title: '   ', body: '  ', date: '2026-09-15' },
+      { hasMedia: true }
+    ).ok).toBe(true);
   });
 
   test('requires a valid date', () => {
@@ -203,9 +222,26 @@ describe('summarizeMonth', () => {
       { date: '2026-09-20', author: 'prakyath' },
     ]);
 
-    expect(summary['2026-09-14']).toEqual({ total: 3, authors: ['prakyath', 'shivani'] });
-    expect(summary['2026-09-20']).toEqual({ total: 1, authors: ['prakyath'] });
+    expect(summary['2026-09-14']).toEqual({ total: 3, authors: ['prakyath', 'shivani'], photos: 0 });
+    expect(summary['2026-09-20']).toEqual({ total: 1, authors: ['prakyath'], photos: 0 });
     expect(summary['2026-09-15']).toBeUndefined();
+  });
+
+  test('totals photos per day across entries', () => {
+    const summary = entries.summarizeMonth([
+      { date: '2026-09-14', author: 'prakyath', media: [{ key: 'a' }, { key: 'b' }] },
+      { date: '2026-09-14', author: 'shivani', media: [{ key: 'c' }] },
+      { date: '2026-09-20', author: 'shivani', media: [] },
+    ]);
+
+    expect(summary['2026-09-14'].photos).toBe(3);
+    expect(summary['2026-09-20'].photos).toBe(0);
+  });
+
+  test('tolerates entries with no media field at all', () => {
+    // Entries written before photos existed have no media attribute.
+    const summary = entries.summarizeMonth([{ date: '2026-09-14', author: 'prakyath' }]);
+    expect(summary['2026-09-14'].photos).toBe(0);
   });
 
   test('handles an empty or junk month without throwing', () => {

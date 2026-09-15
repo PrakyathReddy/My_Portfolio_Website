@@ -130,6 +130,15 @@
       <textarea id="entry-body" rows="8" maxlength="20000"
                 placeholder="Write it down before it fades..."></textarea>
 
+      <fieldset class="photo-field">
+        <legend class="field-label">Photos <span class="optional">up to 10</span></legend>
+        <div id="photo-strip" class="photo-strip"></div>
+        <button type="button" class="btn btn-quiet btn-sm" id="add-photo-btn">
+          Add photos
+        </button>
+        <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple hidden>
+      </fieldset>
+
       <fieldset class="mood-field">
         <legend class="field-label">Mood <span class="optional">optional</span></legend>
         <div id="mood-chips" class="mood-chips"></div>
@@ -146,6 +155,16 @@
       </div>
     </form>
   </div>
+</div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox-close icon-btn" id="lightbox-close" aria-label="Close photo">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round"/>
+    </svg>
+  </button>
+  <img id="lightbox-image" class="lightbox-image" alt="">
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

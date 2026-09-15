@@ -168,6 +168,19 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EntriesTable.Arn
+        - PolicyName: ReadWriteMedia
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # A presigned URL carries the signer's authority, so this role's
+              # permissions are the real ceiling on what any link can do. Two
+              # verbs, one prefix: no ListBucket, no DeleteObject, nothing
+              # outside media/.
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${MediaBucket.Arn}/media/*'
 
   ApiLogGroup:
     Type: AWS::Logs::LogGroup

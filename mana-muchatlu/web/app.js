@@ -24,7 +24,12 @@
     summary: {},
     selectedDay: null, // 'YYYY-MM-DD' or null for the whole month
     pendingMember: null,
+    // Photos attached to the entry currently open in the compose sheet.
+    // Each: { localId, key, status: 'uploading'|'done'|'failed', previewUrl }
+    draftPhotos: [],
   };
+
+  var MAX_PHOTOS = 10;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -354,6 +359,10 @@
       card.appendChild(body);
     }
 
+    if (entry.media && entry.media.length) {
+      card.appendChild(renderPhotoGrid(entry));
+    }
+
     function open() { openSheet(entry); }
     card.addEventListener('click', open);
     card.addEventListener('keydown', function (e) {
@@ -361,6 +370,172 @@
     });
 
     return card;
+  }
+
+  /* --- Photos -------------------------------------------------------------- */
+
+  function renderPhotoGrid(entry) {
+    var grid = document.createElement('div');
+    grid.className = 'entry-photos' + (entry.media.length === 1 ? ' is-single' : '');
+
+    entry.media.forEach(function (item, index) {
+      if (!item.url) return;
+
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'entry-photo';
+      button.setAttribute('aria-label', 'Photo ' + (index + 1) + ' of ' + entry.media.length);
+
+      var img = document.createElement('img');
+      img.src = item.url;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      button.appendChild(img);
+
+      button.addEventListener('click', function (event) {
+        // Without this the click also opens the entry for editing.
+        event.stopPropagation();
+        openLightbox(item.url);
+      });
+
+      grid.appendChild(button);
+    });
+
+    return grid;
+  }
+
+  function openLightbox(url) {
+    $('lightbox-image').src = url;
+    $('lightbox').hidden = false;
+  }
+
+  function closeLightbox() {
+    $('lightbox').hidden = true;
+    // Drop the reference so a large image is not held in memory while closed.
+    $('lightbox-image').src = '';
+  }
+
+  /**
+   * Upload one file and track it in state.
+   *
+   * Two steps: ask the API for a presigned PUT, then send the bytes straight
+   * to storage. The file never passes through the API, which is what keeps
+   * large photos from hitting request size limits.
+   *
+   * Uploads start as soon as a file is picked rather than on save, so by the
+   * time the entry is written the photos are usually already there.
+   */
+  function uploadPhoto(file) {
+    var localId = 'p' + Date.now() + Math.random().toString(36).slice(2, 8);
+    var record = {
+      localId: localId,
+      key: null,
+      status: 'uploading',
+      // A local preview shows instantly, before any byte has left the device.
+      previewUrl: URL.createObjectURL(file),
+    };
+    state.draftPhotos.push(record);
+    renderDraftPhotos();
+
+    return api('/media/presign', {
+      method: 'POST',
+      body: {
+        contentType: file.type,
+        size: file.size,
+        month: ($('entry-date').value || '').slice(0, 7),
+      },
+    })
+      .then(function (presigned) {
+        return fetch(presigned.uploadUrl, {
+          method: presigned.method || 'PUT',
+          headers: { 'content-type': file.type },
+          body: file,
+        }).then(function (response) {
+          if (!response.ok) throw new Error('upload failed');
+          record.key = presigned.key;
+          record.status = 'done';
+          renderDraftPhotos();
+        });
+      })
+      .catch(function (err) {
+        record.status = 'failed';
+        renderDraftPhotos();
+        if (err.message !== 'unauthorized') {
+          toast(err.message === 'upload failed' ? 'A photo did not upload' : err.message);
+        }
+      });
+  }
+
+  function removeDraftPhoto(localId) {
+    state.draftPhotos = state.draftPhotos.filter(function (photo) {
+      if (photo.localId !== localId) return true;
+      // Release the object URL; the browser will not do it for us.
+      if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+      return false;
+    });
+    renderDraftPhotos();
+  }
+
+  function clearDraftPhotos() {
+    state.draftPhotos.forEach(function (photo) {
+      if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+    });
+    state.draftPhotos = [];
+  }
+
+  function renderDraftPhotos() {
+    var strip = $('photo-strip');
+    strip.textContent = '';
+
+    state.draftPhotos.forEach(function (photo) {
+      var chip = document.createElement('div');
+      chip.className = 'photo-chip'
+        + (photo.status === 'uploading' ? ' is-uploading' : '')
+        + (photo.status === 'failed' ? ' is-failed' : '');
+
+      var img = document.createElement('img');
+      img.src = photo.previewUrl || '';
+      img.alt = '';
+      chip.appendChild(img);
+
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'photo-remove';
+      remove.textContent = '\u00d7';
+      remove.setAttribute('aria-label', 'Remove photo');
+      remove.addEventListener('click', function () { removeDraftPhoto(photo.localId); });
+      chip.appendChild(remove);
+
+      strip.appendChild(chip);
+    });
+
+    var remaining = MAX_PHOTOS - state.draftPhotos.length;
+    $('add-photo-btn').disabled = remaining <= 0;
+    $('add-photo-btn').textContent = remaining <= 0
+      ? 'Ten photos is the limit'
+      : (state.draftPhotos.length ? 'Add more' : 'Add photos');
+  }
+
+  function handlePhotoPick(event) {
+    var files = Array.prototype.slice.call(event.target.files || []);
+    // Reset immediately so picking the same file twice still fires a change.
+    event.target.value = '';
+
+    var room = MAX_PHOTOS - state.draftPhotos.length;
+    if (files.length > room) {
+      toast('Only ' + room + ' more photo' + (room === 1 ? '' : 's') + ' will fit');
+      files = files.slice(0, room);
+    }
+
+    files.forEach(uploadPhoto);
+  }
+
+  /** Keys for the photos that finished uploading. */
+  function draftMediaKeys() {
+    return state.draftPhotos
+      .filter(function (photo) { return photo.status === 'done' && photo.key; })
+      .map(function (photo) { return photo.key; });
   }
 
   /* --- Loading ------------------------------------------------------------- */
@@ -418,6 +593,21 @@
     $('entry-body').value = isEdit ? entry.body : '';
     renderMoodChips(isEdit ? entry.mood : '');
 
+    // Existing photos come back already uploaded, so they start as 'done'
+    // and their preview is the presigned url the API just handed us.
+    clearDraftPhotos();
+    if (isEdit && entry.media) {
+      state.draftPhotos = entry.media.map(function (item, index) {
+        return {
+          localId: 'existing' + index,
+          key: item.key,
+          status: 'done',
+          previewUrl: item.url || '',
+        };
+      });
+    }
+    renderDraftPhotos();
+
     $('delete-btn').hidden = !isEdit;
     $('entry-error').hidden = true;
     $('sheet-backdrop').hidden = false;
@@ -427,17 +617,30 @@
 
   function closeSheet() {
     $('sheet-backdrop').hidden = true;
+    clearDraftPhotos();
+    renderDraftPhotos();
   }
 
   function handleSave(event) {
     event.preventDefault();
 
     var entryId = $('entry-id').value;
+
+    // Saving while a photo is still in flight would silently drop it.
+    var stillUploading = state.draftPhotos.some(function (photo) {
+      return photo.status === 'uploading';
+    });
+    if (stillUploading) {
+      toast('Still uploading - one moment');
+      return;
+    }
+
     var payload = {
       date: $('entry-date').value,
       title: $('entry-title').value,
       body: $('entry-body').value,
       mood: selectedMood(),
+      media: draftMediaKeys(),
     };
 
     var errorEl = $('entry-error');
@@ -537,11 +740,22 @@
     $('delete-btn').addEventListener('click', handleDelete);
     $('entry-form').addEventListener('submit', handleSave);
 
+    $('add-photo-btn').addEventListener('click', function () { $('photo-input').click(); });
+    $('photo-input').addEventListener('change', handlePhotoPick);
+
+    $('lightbox-close').addEventListener('click', closeLightbox);
+    $('lightbox').addEventListener('click', function (e) {
+      if (e.target === $('lightbox')) closeLightbox();
+    });
+
     $('sheet-backdrop').addEventListener('click', function (e) {
       if (e.target === $('sheet-backdrop')) closeSheet();
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !$('sheet-backdrop').hidden) closeSheet();
+      if (e.key !== 'Escape') return;
+      // Topmost layer first: the lightbox sits above the compose sheet.
+      if (!$('lightbox').hidden) return closeLightbox();
+      if (!$('sheet-backdrop').hidden) closeSheet();
     });
 
     // Refresh on return rather than polling. At ~10 entries a week, a socket
