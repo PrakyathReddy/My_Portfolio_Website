@@ -58,11 +58,23 @@ MEMBERS_JSON="$(
   MM_ID2="$ID2" MM_NAME2="$NAME2" MM_ACCENT2="$ACCENT2" MM_PASS2="$PASS2" \
   node -e '
     const { hashPassphrase } = require(process.env.MM_AUTH_LIB);
-    const initials = (name) => name.trim().slice(0, 1).toUpperCase();
+
+    const names = [1, 2].map((n) => String(process.env[`MM_NAME${n}`] || "").trim());
+
+    // Two names starting with the same letter would give both people the same
+    // avatar, which defeats the point of having avatars at all. Fall back to
+    // two letters for both when the first letters collide - "Ba" and "Bu"
+    // rather than "B" and "B".
+    const first = (name) => name.slice(0, 1).toUpperCase();
+    const collide = names[0] && first(names[0]) === first(names[1]);
+    const initials = (name) => collide
+      ? (name.slice(0, 1).toUpperCase() + name.slice(1, 2).toLowerCase())
+      : first(name);
+
     const members = [1, 2].map((n) => ({
       id: process.env[`MM_ID${n}`],
-      name: process.env[`MM_NAME${n}`],
-      initials: initials(process.env[`MM_NAME${n}`]),
+      name: names[n - 1],
+      initials: initials(names[n - 1]),
       accent: process.env[`MM_ACCENT${n}`],
       passphraseHash: hashPassphrase(process.env[`MM_PASS${n}`]),
     }));
