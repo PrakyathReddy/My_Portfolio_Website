@@ -374,6 +374,93 @@ else
   pass "live page matches the current frontend"
 fi
 
+# --- Photos -------------------------------------------------------------------
+# Four separate things have to line up before a photo can be added, and a
+# failure in any of them looks identical in the browser: the button does
+# nothing, or the upload spins and fails.
+head_ "Photos"
+
+media_bucket="$(aws cloudformation describe-stacks --region "$AWS_REGION" \
+  --stack-name "$DATA_STACK" \
+  --query "Stacks[0].Outputs[?OutputKey=='MediaBucketName'].OutputValue" \
+  --output text 2>/dev/null)"
+
+# 1. Is the photo UI even on the live site?
+if curl -sS --max-time 15 "https://${DOMAIN_NAME}/" 2>/dev/null | grep -q 'id="photo-input"'; then
+  pass "the live page has the photo picker"
+else
+  fail "the live page has no photo picker - the frontend predates photos"
+  note "fix: git pull && ./deploy.sh"
+fi
+
+# 2. Does the function know where to put them?
+if [ -n "$config" ]; then
+  bucket_env="$(printf '%s' "$config" | node -pe \
+    'const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+     ((c.Environment && c.Environment.Variables) || {}).MEDIA_BUCKET || ""')"
+  if [ -n "$bucket_env" ]; then
+    pass "env MEDIA_BUCKET is ${bucket_env}"
+  else
+    fail "env MEDIA_BUCKET is not set, so uploads cannot be presigned"
+    note "fix: ./deploy.sh api"
+  fi
+fi
+
+# 3. May the function's role actually write to the bucket? A presigned url
+#    carries the signer's authority, so without this the url is valid-looking
+#    and S3 refuses it.
+role_arn="$(printf '%s' "${config:-{\}}" | node -pe \
+  'try { JSON.parse(require("fs").readFileSync(0,"utf8")).Role || "" } catch (e) { "" }')"
+role_name="${role_arn##*/}"
+
+if [ -n "$role_name" ]; then
+  s3_ok=no
+  for policy in $(aws iam list-role-policies --role-name "$role_name" \
+                    --query 'PolicyNames[]' --output text 2>/dev/null); do
+    if aws iam get-role-policy --role-name "$role_name" --policy-name "$policy" \
+         --output json 2>/dev/null | grep -q 's3:PutObject'; then
+      s3_ok=yes
+    fi
+  done
+
+  if [ "$s3_ok" = yes ]; then
+    pass "the function's role may write to the media bucket"
+  else
+    fail "the function's role has no s3:PutObject"
+    note "a presigned url carries the signer's authority, so S3 will refuse"
+    note "every upload until the role can write."
+    note "fix: ./deploy.sh   (the data stack grants it)"
+  fi
+fi
+
+# 4. Will the browser be allowed to PUT across origins? The upload goes from
+#    the page directly to S3, so the BUCKET's CORS rules decide, not the
+#    Function URL's.
+if [ -n "$media_bucket" ] && [ "$media_bucket" != "None" ]; then
+  if cors_json="$(aws s3api get-bucket-cors --bucket "$media_bucket" \
+       --region "$AWS_REGION" --output json 2>/dev/null)"; then
+    allows="$(printf '%s' "$cors_json" | MM_ORIGIN="https://${DOMAIN_NAME}" node -pe '
+      const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+      const rules = c.CORSRules || [];
+      const ok = rules.some((r) =>
+        (r.AllowedMethods || []).includes("PUT") &&
+        (r.AllowedOrigins || []).some((o) => o === "*" || o === process.env.MM_ORIGIN));
+      ok ? "yes" : "no";
+    ')"
+    if [ "$allows" = yes ]; then
+      pass "the media bucket allows PUT from https://${DOMAIN_NAME}"
+    else
+      fail "the media bucket does not allow PUT from https://${DOMAIN_NAME}"
+      note "the browser uploads straight to S3, so the bucket's own CORS rules"
+      note "decide - not the Function URL's."
+      note "fix: ./deploy.sh"
+    fi
+  else
+    fail "the media bucket has no CORS configuration at all"
+    note "fix: ./deploy.sh"
+  fi
+fi
+
 # --- Summary ------------------------------------------------------------------
 if [ "$PROBLEMS" -eq 0 ]; then
   printf '\n\033[32mEverything checks out.\033[0m https://%s\n\n' "$DOMAIN_NAME"
