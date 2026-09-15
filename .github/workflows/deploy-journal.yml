@@ -1,0 +1,72 @@
+name: Deploy Mana Muchatlu
+
+# Separate from deploy.yml on purpose: the journal has its own bucket, its own
+# distribution and its own blast radius. A portfolio change must never be able
+# to touch it, and vice versa.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mana-muchatlu/web/**'
+      - 'mana-muchatlu/api/**'
+      - '.github/workflows/deploy-journal.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: true
+        default: 'web'
+        type: choice
+        options: [web, api, all]
+
+concurrency:
+  # Never let two deploys race for the same bucket.
+  group: journal-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        # The API's pure logic - auth, validation, key construction - is what
+        # a bug would be silent in. Nothing ships without this passing.
+        run: npx jest mana-muchatlu
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy
+        env:
+          PROJECT_NAME: mana-muchatlu
+          DOMAIN_NAME: mana-muchatlu-shivani.prakyath.dev
+          APEX_DOMAIN: prakyath.dev
+        run: |
+          chmod +x mana-muchatlu/infra/deploy.sh
+          ./mana-muchatlu/infra/deploy.sh "${{ inputs.target || 'web' }}"

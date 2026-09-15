@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+#
+# Deploy Mana Muchatlu end to end. Idempotent - safe to re-run.
+#
+#   ./deploy.sh              full deploy (infra + api + web)
+#   ./deploy.sh web          frontend only (the common case while iterating)
+#   ./deploy.sh api          lambda code + config only
+#
+set -euo pipefail
+
+PROJECT_NAME="${PROJECT_NAME:-mana-muchatlu}"
+DOMAIN_NAME="${DOMAIN_NAME:-mana-muchatlu-shivani.prakyath.dev}"
+AWS_REGION="${AWS_REGION:-us-east-1}" # CloudFront requires us-east-1 certs
+APEX_DOMAIN="${APEX_DOMAIN:-prakyath.dev}"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${HERE}/.." && pwd)"
+BUILD_DIR="${ROOT}/.build"
+
+DATA_STACK="${PROJECT_NAME}-data"
+WEB_STACK="${PROJECT_NAME}-web"
+TARGET="${1:-all}"
+
+log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
+
+stack_output() {
+  aws cloudformation describe-stacks \
+    --region "$AWS_REGION" --stack-name "$1" \
+    --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" \
+    --output text 2>/dev/null
+}
+
+require_tools() {
+  for tool in aws node zip; do
+    command -v "$tool" >/dev/null || { echo "required tool not found: $tool"; exit 1; }
+  done
+  aws sts get-caller-identity >/dev/null || { echo "AWS credentials not configured"; exit 1; }
+}
+
+# -----------------------------------------------------------------------------
+deploy_data_stack() {
+  log "Deploying data stack (DynamoDB, buckets, Lambda)"
+  aws cloudformation deploy \
+    --region "$AWS_REGION" \
+    --stack-name "$DATA_STACK" \
+    --template-file "${HERE}/data-stack.yaml" \
+    --capabilities CAPABILITY_IAM \
+    --no-fail-on-empty-changeset \
+    --parameter-overrides \
+      "ProjectName=${PROJECT_NAME}" \
+      "AllowedOrigin=https://${DOMAIN_NAME}"
+}
+
+deploy_api_code() {
+  log "Packaging API"
+  rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
+  cp -r "${ROOT}/api/index.js" "${ROOT}/api/lib" "$BUILD_DIR/"
+
+  # No node_modules: the handler uses only Node built-ins plus the AWS SDK
+  # that the Lambda runtime already ships. The artifact is a few KB, so cold
+  # starts stay in the low tens of milliseconds.
+  (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js lib)
+
+  log "Uploading API code"
+  aws lambda update-function-code \
+    --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-api" \
+    --zip-file "fileb://${BUILD_DIR}/api.zip" \
+    --output text --query 'LastModified'
+
+  aws lambda wait function-updated \
+    --region "$AWS_REGION" --function-name "${PROJECT_NAME}-api"
+
+  log "Injecting secrets from SSM into the function config"
+  local session_secret members table_name media_bucket
+  session_secret="$(aws ssm get-parameter --region "$AWS_REGION" \
+    --name "/${PROJECT_NAME}/session-secret" --with-decryption \
+    --query 'Parameter.Value' --output text)"
+  members="$(aws ssm get-parameter --region "$AWS_REGION" \
+    --name "/${PROJECT_NAME}/members" --with-decryption \
+    --query 'Parameter.Value' --output text)"
+  table_name="$(stack_output "$DATA_STACK" TableName)"
+  media_bucket="$(stack_output "$DATA_STACK" MediaBucketName)"
+
+  # --environment carries the secrets, so send it via a temp file with tight
+  # permissions rather than argv, which is world-readable through `ps`.
+  local env_file
+  env_file="$(mktemp)"
+  chmod 600 "$env_file"
+  # shellcheck disable=SC2064
+  trap "rm -f '$env_file'" RETURN
+
+  MM_SECRET="$session_secret" MM_MEMBERS="$members" MM_TABLE="$table_name" \
+  MM_MEDIA="$media_bucket" MM_COUPLE="${COUPLE_ID:-mana}" MM_ORIGIN="https://${DOMAIN_NAME}" \
+  node -e '
+    process.stdout.write(JSON.stringify({ Variables: {
+      TABLE_NAME: process.env.MM_TABLE,
+      MEDIA_BUCKET: process.env.MM_MEDIA,
+      COUPLE_ID: process.env.MM_COUPLE,
+      ALLOWED_ORIGIN: process.env.MM_ORIGIN,
+      SESSION_SECRET: process.env.MM_SECRET,
+      MEMBERS: process.env.MM_MEMBERS,
+    }}));
+  ' > "$env_file"
+
+  aws lambda update-function-configuration \
+    --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-api" \
+    --environment "file://${env_file}" \
+    --output text --query 'LastModified'
+
+  aws lambda wait function-updated \
+    --region "$AWS_REGION" --function-name "${PROJECT_NAME}-api"
+}
+
+deploy_web_stack() {
+  log "Resolving hosted zone for ${APEX_DOMAIN}"
+  local zone_id
+  zone_id="$(aws route53 list-hosted-zones-by-name \
+    --dns-name "${APEX_DOMAIN}." \
+    --query "HostedZones[?Name=='${APEX_DOMAIN}.'].Id | [0]" \
+    --output text | sed 's|/hostedzone/||')"
+
+  [ -n "$zone_id" ] && [ "$zone_id" != "None" ] || {
+    echo "No Route53 hosted zone found for ${APEX_DOMAIN}"; exit 1;
+  }
+  echo "  zone: ${zone_id}"
+
+  log "Deploying web stack (S3, CloudFront, ACM, Route53)"
+  echo "  First run issues an ACM certificate - this can take 5-30 minutes"
+  echo "  while DNS validation propagates. Later runs are fast."
+  aws cloudformation deploy \
+    --region "$AWS_REGION" \
+    --stack-name "$WEB_STACK" \
+    --template-file "${HERE}/web-stack.yaml" \
+    --no-fail-on-empty-changeset \
+    --parameter-overrides \
+      "ProjectName=${PROJECT_NAME}" \
+      "DomainName=${DOMAIN_NAME}" \
+      "HostedZoneId=${zone_id}"
+}
+
+publish_web() {
+  local api_endpoint site_bucket distribution_id
+  api_endpoint="$(stack_output "$DATA_STACK" ApiEndpoint)"
+  site_bucket="$(stack_output "$WEB_STACK" SiteBucketName)"
+  distribution_id="$(stack_output "$WEB_STACK" DistributionId)"
+
+  [ -n "$api_endpoint" ] || { echo "data stack not deployed yet"; exit 1; }
+  [ -n "$site_bucket" ] || { echo "web stack not deployed yet"; exit 1; }
+
+  log "Writing config.js"
+  # Generated, not committed: the endpoint is an output of the data stack, so
+  # keeping a copy in git would be a second source of truth that goes stale.
+  cat > "${ROOT}/web/config.js" <<EOF
+// Generated by infra/deploy.sh - do not edit, do not commit.
+window.MANA_CONFIG = {
+  apiBase: '${api_endpoint%/}',
+};
+EOF
+
+  log "Syncing web/ to ${site_bucket}"
+  # Hashed-forever assets could be cached longer, but the whole app is ~40KB;
+  # the edge-level no-cache behaviours in web-stack.yaml handle the shell.
+  aws s3 sync "${ROOT}/web" "s3://${site_bucket}" --delete \
+    --cache-control 'public, max-age=300'
+
+  log "Invalidating CloudFront"
+  aws cloudfront create-invalidation \
+    --distribution-id "$distribution_id" \
+    --paths '/*' \
+    --output text --query 'Invalidation.Id'
+
+  log "Live at https://${DOMAIN_NAME}"
+}
+
+# -----------------------------------------------------------------------------
+require_tools
+
+case "$TARGET" in
+  all)
+    deploy_data_stack
+    deploy_api_code
+    deploy_web_stack
+    publish_web
+    ;;
+  api)
+    deploy_api_code
+    ;;
+  web)
+    publish_web
+    ;;
+  *)
+    echo "usage: $0 [all|api|web]"
+    exit 1
+    ;;
+esac

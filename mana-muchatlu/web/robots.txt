@@ -1,0 +1,5 @@
+# This is a private journal. Nothing here should ever be indexed.
+# CloudFront also sends X-Robots-Tag: noindex on every response, because
+# robots.txt is a request and a header is closer to an instruction.
+User-agent: *
+Disallow: /

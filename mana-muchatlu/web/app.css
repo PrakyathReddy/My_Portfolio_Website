@@ -1,0 +1,485 @@
+/* ===========================================================================
+   Mana Muchatlu
+   A warm, paper-like palette rather than the usual app blue - this is meant to
+   feel like a notebook you kept, not a tool you use.
+   =========================================================================== */
+
+:root {
+  --paper:        #f7f3ee;
+  --paper-raised: #fffdfa;
+  --ink:          #2e2925;
+  --ink-soft:     #6b615a;
+  --ink-faint:    #9a8f86;
+  --rule:         #e6ddd2;
+  --rule-strong:  #d5c9bb;
+  --accent:       #a8654a;
+  --accent-soft:  #f0e3dc;
+  --danger:       #a8443a;
+
+  --radius:    14px;
+  --radius-sm: 9px;
+  --shadow:    0 1px 2px rgba(46, 41, 37, .05), 0 8px 24px rgba(46, 41, 37, .07);
+  --shadow-sm: 0 1px 3px rgba(46, 41, 37, .09);
+
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --sans:  system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:        #1a1714;
+    --paper-raised: #241f1b;
+    --ink:          #ece5dd;
+    --ink-soft:     #b3a79c;
+    --ink-faint:    #7d7167;
+    --rule:         #332c26;
+    --rule-strong:  #453c34;
+    --accent:       #d98e6e;
+    --accent-soft:  #3a2b23;
+    --danger:       #d97b70;
+    --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+[hidden] { display: none !important; }
+
+button, input, textarea { font: inherit; color: inherit; }
+
+/* --- Buttons -------------------------------------------------------------- */
+.btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: .68rem 1.1rem;
+  font-weight: 600;
+  font-size: .94rem;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, opacity .15s;
+  background: transparent;
+}
+.btn-sm { padding: .45rem .8rem; font-size: .86rem; }
+
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: .9; }
+.btn-primary:disabled { opacity: .5; cursor: progress; }
+
+.btn-quiet { color: var(--ink-soft); border-color: var(--rule-strong); }
+.btn-quiet:hover { background: var(--rule); }
+
+.btn-danger { color: var(--danger); border-color: transparent; }
+.btn-danger:hover { background: var(--accent-soft); }
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--rule); color: var(--ink); }
+
+:where(button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Avatars -------------------------------------------------------------- */
+/* Identity is carried by the avatar, not by entry colour: it survives export
+   as a plain author field, and it still works if a third person ever joins. */
+.avatar {
+  --size: 40px;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: calc(var(--size) * .4);
+  letter-spacing: .02em;
+  color: #fff;
+  background: var(--avatar-accent, var(--accent));
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .22);
+  flex: none;
+  user-select: none;
+}
+.avatar-sm { --size: 30px; }
+.avatar-lg { --size: 60px; }
+
+/* --- Sign in -------------------------------------------------------------- */
+.signin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: calc(2rem + var(--safe-top)) 1.25rem calc(2rem + var(--safe-bottom));
+}
+
+.signin-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 2.25rem 1.75rem;
+  text-align: center;
+}
+
+.wordmark { margin: 0; display: grid; gap: .3rem; }
+.wordmark-te { font-size: 1.85rem; font-weight: 600; line-height: 1.3; }
+.wordmark-en {
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink-soft);
+  letter-spacing: .04em;
+}
+.signin-tagline {
+  margin: .5rem 0 1.9rem;
+  color: var(--ink-faint);
+  font-size: .87rem;
+}
+
+.member-picker { display: grid; gap: .6rem; }
+
+.member-btn {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  width: 100%;
+  padding: .7rem .9rem;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s, background-color .15s;
+}
+.member-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+.member-btn-name { font-weight: 600; }
+
+.signin-form { display: grid; gap: .7rem; text-align: left; }
+.signin-form input {
+  width: 100%;
+  padding: .72rem .85rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+.signin-form input:focus { border-color: var(--accent); }
+
+.field-label {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  letter-spacing: .01em;
+}
+.optional { font-weight: 400; color: var(--ink-faint); font-size: .78rem; }
+
+.error-text {
+  margin: .9rem 0 0;
+  color: var(--danger);
+  font-size: .87rem;
+}
+
+/* --- App shell ------------------------------------------------------------ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--rule);
+  padding-top: var(--safe-top);
+}
+.app-header-inner {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: .6rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.app-title { margin: 0; font-size: 1.12rem; font-weight: 600; }
+.app-header-right { display: flex; align-items: center; gap: .4rem; }
+
+.app-main {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem calc(6.5rem + var(--safe-bottom));
+}
+
+/* --- Calendar ------------------------------------------------------------- */
+.calendar-section {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1rem .85rem 1.15rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .6rem;
+}
+.month-label { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: .01em; }
+
+.weekday-row, .calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.weekday-row {
+  margin-bottom: .3rem;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-align: center;
+  letter-spacing: .06em;
+}
+
+.day {
+  position: relative;
+  aspect-ratio: 1;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: .87rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0;
+  transition: background-color .15s;
+}
+.day:hover { background: var(--rule); }
+.day.is-blank { visibility: hidden; cursor: default; }
+.day.is-today { font-weight: 800; box-shadow: inset 0 0 0 1.5px var(--rule-strong); }
+.day.is-selected { background: var(--accent); color: #fff; }
+.day.is-selected .dot { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .85); }
+
+/* One dot per person who wrote that day - the calendar shows at a glance
+   whose month it has been. */
+.day-dots { display: flex; gap: 3px; height: 6px; align-items: center; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dot-accent, var(--accent)); }
+
+/* --- Feed ----------------------------------------------------------------- */
+.feed-section { margin-top: 1.5rem; }
+.feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .8rem;
+}
+.feed-label { margin: 0; font-size: .95rem; font-weight: 700; letter-spacing: .01em; }
+
+.feed { display: grid; gap: .85rem; }
+
+.entry {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--entry-accent, var(--rule-strong));
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color .15s, transform .12s;
+}
+.entry:hover { transform: translateY(-1px); }
+
+.entry-head { display: flex; align-items: center; gap: .65rem; margin-bottom: .55rem; }
+.entry-meta { min-width: 0; flex: 1; }
+.entry-author { font-weight: 650; font-size: .88rem; }
+.entry-when { font-size: .76rem; color: var(--ink-faint); }
+.entry-mood { font-size: 1.05rem; flex: none; }
+
+.entry-title {
+  margin: 0 0 .3rem;
+  font-family: var(--serif);
+  font-size: 1.14rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.entry-body {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.entry-body.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.entry-edited { font-size: .74rem; color: var(--ink-faint); font-style: italic; }
+
+.empty {
+  text-align: center;
+  padding: 2.75rem 1rem;
+  color: var(--ink-faint);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+}
+.empty-headline { font-family: var(--serif); font-size: 1.05rem; margin: 0 0 .3rem; color: var(--ink-soft); }
+.empty-sub { margin: 0; font-size: .86rem; }
+
+/* --- Floating compose button ---------------------------------------------- */
+.fab {
+  position: fixed;
+  right: 1.15rem;
+  bottom: calc(1.15rem + var(--safe-bottom));
+  z-index: 30;
+  width: 58px; height: 58px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(46, 41, 37, .22);
+  transition: transform .15s;
+}
+.fab:hover { transform: scale(1.05); }
+.fab:active { transform: scale(.96); }
+
+/* --- Compose sheet -------------------------------------------------------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(30, 26, 22, .42);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 620px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  background: var(--paper-raised);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 1.1rem 1.25rem calc(1.5rem + var(--safe-bottom));
+  box-shadow: var(--shadow);
+  animation: sheet-rise .22s ease-out;
+}
+@keyframes sheet-rise { from { transform: translateY(12px); opacity: .6; } }
+@media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none; }
+  .entry, .fab { transition: none; }
+}
+
+@media (min-width: 640px) {
+  .sheet-backdrop { align-items: center; }
+  .sheet { border-radius: var(--radius); max-height: 88dvh; }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .9rem;
+}
+.sheet-title { margin: 0; font-size: 1.06rem; font-weight: 700; }
+
+.entry-form { display: grid; gap: .4rem; }
+.entry-form input[type="text"],
+.entry-form input[type="date"],
+.entry-form textarea {
+  width: 100%;
+  padding: .7rem .8rem;
+  margin-bottom: .55rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+.entry-form textarea {
+  resize: vertical;
+  min-height: 150px;
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+.entry-form input:focus, .entry-form textarea:focus { border-color: var(--accent); }
+
+.mood-field { border: none; padding: 0; margin: .2rem 0 .3rem; }
+.mood-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+.mood-chip {
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  border-radius: 999px;
+  padding: .32rem .7rem;
+  font-size: .84rem;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+.mood-chip:hover { border-color: var(--accent); }
+.mood-chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  margin-top: 1.1rem;
+}
+.sheet-actions-right { display: flex; gap: .55rem; margin-left: auto; }
+
+/* --- Toast ---------------------------------------------------------------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(5.5rem + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 50;
+  background: var(--ink);
+  color: var(--paper);
+  padding: .6rem 1.1rem;
+  border-radius: 999px;
+  font-size: .87rem;
+  font-weight: 500;
+  box-shadow: var(--shadow);
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+}

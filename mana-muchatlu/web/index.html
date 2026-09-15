@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#f7f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)">
+  <title>Mana Muchatlu</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Muchatlu">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <link rel="stylesheet" href="app.css">
+  <script src="config.js"></script>
+</head>
+<body>
+
+<!-- Sign in ------------------------------------------------------------- -->
+<main id="signin-view" class="signin" hidden>
+  <div class="signin-card">
+    <h1 class="wordmark">
+      <span class="wordmark-te" lang="te">మన ముచ్చట్లు</span>
+      <span class="wordmark-en">Mana Muchatlu</span>
+    </h1>
+    <p class="signin-tagline">our conversations, kept</p>
+
+    <div id="member-picker" class="member-picker" role="group" aria-label="Who is writing?"></div>
+
+    <form id="signin-form" class="signin-form" hidden>
+      <label class="field-label" for="passphrase">
+        Passphrase for <span id="signin-name"></span>
+      </label>
+      <input type="password" id="passphrase" name="passphrase"
+             autocomplete="current-password" required
+             placeholder="your passphrase">
+      <button type="submit" class="btn btn-primary" id="signin-submit">Open our journal</button>
+      <button type="button" class="btn btn-quiet" id="signin-back">Not me</button>
+    </form>
+
+    <p id="signin-error" class="error-text" role="alert" hidden></p>
+  </div>
+</main>
+
+<!-- Journal -------------------------------------------------------------- -->
+<div id="app-view" hidden>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <h1 class="app-title" lang="te">మన ముచ్చట్లు</h1>
+      <div class="app-header-right">
+        <div id="current-avatar" class="avatar avatar-sm" title=""></div>
+        <button type="button" class="icon-btn" id="signout-btn" aria-label="Sign out">
+          <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
+                  fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="calendar-section" aria-label="Calendar">
+      <div class="month-nav">
+        <button type="button" class="icon-btn" id="prev-month" aria-label="Previous month">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <h2 id="month-label" class="month-label">&nbsp;</h2>
+        <button type="button" class="icon-btn" id="next-month" aria-label="Next month">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="weekday-row" aria-hidden="true">
+        <span>M</span><span>T</span><span>W</span><span>T</span>
+        <span>F</span><span>S</span><span>S</span>
+      </div>
+      <div id="calendar-grid" class="calendar-grid" role="grid"></div>
+    </section>
+
+    <section class="feed-section" aria-label="Entries">
+      <div class="feed-head">
+        <h2 id="feed-label" class="feed-label">This month</h2>
+        <button type="button" class="btn btn-quiet btn-sm" id="clear-filter" hidden>
+          Show whole month
+        </button>
+      </div>
+      <div id="feed" class="feed" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <button type="button" class="fab" id="compose-btn" aria-label="Write an entry">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Compose sheet -------------------------------------------------------- -->
+<div id="sheet-backdrop" class="sheet-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-head">
+      <h2 id="sheet-title" class="sheet-title">New entry</h2>
+      <button type="button" class="icon-btn" id="sheet-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <form id="entry-form" class="entry-form">
+      <input type="hidden" id="entry-id">
+
+      <label class="field-label" for="entry-date">Date</label>
+      <input type="date" id="entry-date" required>
+
+      <label class="field-label" for="entry-title">Title <span class="optional">optional</span></label>
+      <input type="text" id="entry-title" maxlength="200" placeholder="a few words">
+
+      <label class="field-label" for="entry-body">What happened?</label>
+      <textarea id="entry-body" rows="8" maxlength="20000"
+                placeholder="Write it down before it fades..."></textarea>
+
+      <fieldset class="mood-field">
+        <legend class="field-label">Mood <span class="optional">optional</span></legend>
+        <div id="mood-chips" class="mood-chips"></div>
+      </fieldset>
+
+      <p id="entry-error" class="error-text" role="alert" hidden></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-danger btn-sm" id="delete-btn" hidden>Delete</button>
+        <div class="sheet-actions-right">
+          <button type="button" class="btn btn-quiet" id="cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
