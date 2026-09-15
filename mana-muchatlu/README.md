@@ -29,6 +29,45 @@ the Route53 hosted zone. That isolation is deliberate — see
 
 Video, voice notes, transcription, offline entry cache.
 
+## Backups
+
+Four layers, and it is worth being precise about what each one actually covers:
+
+| Layer | Protects against | Does not cover |
+|---|---|---|
+| DynamoDB point-in-time recovery (35 days) | a bad deploy, a corrupting bug | losing the account |
+| S3 versioning (90 days) | deleting a photo by accident | losing the account |
+| Nightly archive to `BackupBucket` | the app's data model changing under you | losing the account |
+| **`./infra/pull-backup.sh`** | **losing the account** | whatever you have not pulled yet |
+
+The first three all live *inside the account they protect*. That is the entire
+reason for the fourth: `pull-backup.sh` copies the archive and every photo onto
+your machine and verifies what arrived. Nothing it writes needs this app, or
+AWS, to read. Point it at a synced folder and the sync client does the
+off-machine hop:
+
+```bash
+./infra/pull-backup.sh ~/"Google Drive"/mana-muchatlu
+```
+
+It is a command a person runs, not a cron job, on purpose. An automated Drive
+push needs an OAuth refresh token that expires quietly, leaving a backup you
+believe in but do not have. A copy made deliberately four times a year beats an
+automated one you cannot see failing. It never passes `--delete` either: a
+local mirror of a deletion is not a backup, it is a faithful reproduction of
+the accident.
+
+The nightly job verifies the snapshot **before** writing it and refuses to
+replace a good archive with a failing one — a backup that faithfully preserves
+corruption is worse than one that stops. Its IAM role is read-only on the
+table, because a backup process with write access to what it backs up is one
+bug away from being the disaster.
+
+The Sunday email then re-reads what was written and reports it. That is what
+lets it say *verified* rather than *ran*: a backup that reports nothing is
+indistinguishable from one that stopped, and the difference only surfaces on
+the day it matters.
+
 ---
 
 ## Architecture
@@ -105,6 +144,7 @@ Afterwards:
 ```bash
 ./deploy.sh web       # frontend only — the common case
 ./deploy.sh api       # Lambda code + config only
+./deploy.sh archive   # run the backup now and print what it wrote
 ```
 
 Passphrases are hashed locally with scrypt; only the hash leaves the machine.
