@@ -100,8 +100,12 @@ node scripts/dev-server.js     # http://localhost:4173
 
 Serves `web/` and stands in for the API using the **real** `lib/auth.js` and
 `lib/entries.js`, so sign-in and validation behave exactly as in Lambda. Only
-DynamoDB is swapped for an in-memory `Map`. Dev passphrase is printed at
-startup; the server binds to localhost only.
+DynamoDB is swapped for an in-memory `Map`.
+
+Both members sign in with `test`. Override with `MANA_DEV_PASSPHRASE=… node
+scripts/dev-server.js` if you want something else. It is printed at startup,
+binds to localhost only, and has nothing to do with the real passphrases —
+those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
 npx jest mana-muchatlu          # 52 unit + property tests

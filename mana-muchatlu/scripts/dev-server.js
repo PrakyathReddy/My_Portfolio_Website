@@ -26,7 +26,10 @@ const PORT = Number(process.env.PORT || 4173);
 const WEB_DIR = path.join(__dirname, '..', 'web');
 const SESSION_SECRET = crypto.randomBytes(32).toString('base64');
 
-const DEV_PASSPHRASE = 'muchatlu';
+// Fine to be this weak: the server binds to 127.0.0.1 and the data is a Map
+// that dies with the process. The real passphrases live in SSM and are set by
+// init-secrets.sh, which never sees this value.
+const DEV_PASSPHRASE = process.env.MANA_DEV_PASSPHRASE || 'test';
 const MEMBERS = auth.parseMembers(JSON.stringify([
   { id: 'prakyath', name: 'Prakyath', initials: 'P', accent: '#4a6fa5', passphraseHash: auth.hashPassphrase(DEV_PASSPHRASE) },
   { id: 'shivani', name: 'Shivani', initials: 'S', accent: '#c2847a', passphraseHash: auth.hashPassphrase(DEV_PASSPHRASE) },
