@@ -6,6 +6,7 @@
 #   ./deploy.sh web          frontend only (the common case while iterating)
 #   ./deploy.sh api          lambda code + config only
 #   ./deploy.sh archive      run the backup now and report what it wrote
+#   ./deploy.sh report       send the weekly note now, without waiting for Sunday
 #
 set -euo pipefail
 
@@ -297,6 +298,27 @@ EOF
   log "Live at https://${DOMAIN_NAME}"
 }
 
+# Fire the weekly note on demand. Useful once, to confirm the mail actually
+# arrives - an unconfirmed SNS subscription delivers nothing and says nothing.
+send_report() {
+  log "Sending the weekly report now"
+
+  local out
+  out="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$out'" RETURN
+
+  aws lambda invoke \
+    --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-archive" \
+    --payload '{"job":"report"}' \
+    --cli-binary-format raw-in-base64-out \
+    "$out" --output text --query 'FunctionError' >/dev/null 2>&1 || true
+
+  echo "  $(cat "$out")"
+  echo "  If no mail arrives, the subscription is probably unconfirmed - run ./doctor.sh"
+}
+
 # -----------------------------------------------------------------------------
 require_tools
 
@@ -317,13 +339,16 @@ case "$TARGET" in
   archive)
     verify_archive
     ;;
+  report)
+    send_report
+    ;;
   web)
     publish_web
     ;;
   *)
     echo
     echo "  Nothing was deployed: '${TARGET}' is not a valid target."
-    echo "  usage: $0 [all|api|web|archive]   (default: all)"
+    echo "  usage: $0 [all|api|web|archive|report]   (default: all)"
     echo
     exit 1
     ;;

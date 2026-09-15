@@ -15,6 +15,8 @@ PROJECT_NAME="${PROJECT_NAME:-mana-muchatlu}"
 DOMAIN_NAME="${DOMAIN_NAME:-mana-muchatlu-shivani.prakyath.dev}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 DATA_STACK="${PROJECT_NAME}-data"
 WEB_STACK="${PROJECT_NAME}-web"
 
@@ -458,6 +460,149 @@ if [ -n "$media_bucket" ] && [ "$media_bucket" != "None" ]; then
   else
     fail "the media bucket has no CORS configuration at all"
     note "fix: ./deploy.sh"
+  fi
+fi
+
+# --- Archive ------------------------------------------------------------------
+# A backup has a special failure mode: everything looks fine until the day you
+# need it. So this checks the parts independently - that the job exists, that
+# it is scheduled, that something was actually written, that what was written
+# verifies, and that the report has somewhere to go.
+head_ "Archive"
+
+archive_fn="${PROJECT_NAME}-archive"
+backup_bucket="$(stack_output "$DATA_STACK" BackupBucketName)"
+topic_arn="$(stack_output "$DATA_STACK" ReportTopicArn)"
+
+if archive_config="$(aws lambda get-function-configuration --region "$AWS_REGION" \
+     --function-name "$archive_fn" --output json 2>/dev/null)"; then
+  archive_size="$(printf '%s' "$archive_config" | node -pe \
+    'JSON.parse(require("fs").readFileSync(0,"utf8")).CodeSize')"
+  if [ "$archive_size" -lt 1000 ]; then
+    fail "archive code is ${archive_size} bytes - still the placeholder"
+    note "fix: ./deploy.sh api"
+  else
+    pass "archive function deployed (${archive_size} bytes)"
+  fi
+
+  for var in TABLE_NAME BACKUP_BUCKET MEMBERS TOPIC_ARN; do
+    present="$(printf '%s' "$archive_config" | MM_VAR="$var" node -pe \
+      'const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+       ((c.Environment && c.Environment.Variables) || {})[process.env.MM_VAR] ? "yes" : "no"')"
+    if [ "$present" = "yes" ]; then
+      pass "archive env ${var} is set"
+    else
+      fail "archive env ${var} is NOT set"
+      note "fix: ./deploy.sh api"
+    fi
+  done
+else
+  fail "archive function not found"
+  note "fix: ./deploy.sh"
+fi
+
+# Schedules. A disabled rule is the quietest possible failure.
+for rule in "${PROJECT_NAME}-nightly-archive" "${PROJECT_NAME}-weekly-report"; do
+  rule_state="$(aws events describe-rule --region "$AWS_REGION" --name "$rule" \
+    --query 'State' --output text 2>/dev/null)"
+  if [ "$rule_state" = "ENABLED" ]; then
+    schedule="$(aws events describe-rule --region "$AWS_REGION" --name "$rule" \
+      --query 'ScheduleExpression' --output text 2>/dev/null)"
+    pass "${rule} is enabled  ${schedule}"
+  elif [ -n "$rule_state" ] && [ "$rule_state" != "None" ]; then
+    fail "${rule} is ${rule_state} - it will never fire"
+    note "fix: aws events enable-rule --name ${rule} --region ${AWS_REGION}"
+  else
+    fail "${rule} does not exist"
+    note "fix: ./deploy.sh"
+  fi
+done
+
+# An unconfirmed SNS subscription delivers nothing, forever, silently. This is
+# the single most likely reason for a healthy backup that never tells you so.
+if [ -n "$topic_arn" ] && [ "$topic_arn" != "None" ]; then
+  subs="$(aws sns list-subscriptions-by-topic --region "$AWS_REGION" \
+    --topic-arn "$topic_arn" --output json 2>/dev/null)"
+  confirmed="$(printf '%s' "${subs:-{\}}" | node -pe '
+    let c; try { c = JSON.parse(require("fs").readFileSync(0,"utf8")); } catch (e) { c = {}; }
+    const list = c.Subscriptions || [];
+    const ok = list.filter((s) => s.SubscriptionArn && s.SubscriptionArn.startsWith("arn:"));
+    const pending = list.filter((s) => s.SubscriptionArn === "PendingConfirmation");
+    ok.length + "/" + pending.length + "/" + list.map((s) => s.Endpoint).join(",");
+  ')"
+  ok_count="${confirmed%%/*}"
+  rest="${confirmed#*/}"
+  pending_count="${rest%%/*}"
+  endpoints="${rest#*/}"
+
+  if [ "$ok_count" -gt 0 ]; then
+    pass "${ok_count} confirmed report subscriber(s): ${endpoints}"
+  elif [ "$pending_count" -gt 0 ]; then
+    fail "${pending_count} subscription(s) still unconfirmed: ${endpoints}"
+    note "SNS emailed a confirmation link - until it is clicked, nothing is"
+    note "delivered and nothing says so. Check spam."
+  else
+    fail "nobody is subscribed to the weekly report"
+    note "fix: NOTIFY_EMAIL=you@example.com ./deploy.sh"
+  fi
+fi
+
+# The archive itself: does it exist, how old is it, and does it verify?
+if [ -n "$backup_bucket" ] && [ "$backup_bucket" != "None" ]; then
+  latest_meta="$(aws s3api head-object --bucket "$backup_bucket" \
+    --key archives/latest.json --region "$AWS_REGION" --output json 2>/dev/null)"
+
+  if [ -z "$latest_meta" ]; then
+    fail "no archives/latest.json in ${backup_bucket} - nothing has been backed up"
+    note "fix: ./deploy.sh archive"
+  else
+    tmp_archive="$(mktemp)"
+    aws s3 cp "s3://${backup_bucket}/archives/latest.json" "$tmp_archive" \
+      --region "$AWS_REGION" --quiet 2>/dev/null
+
+    MM_LIB="${HERE}/../api/lib/archive.js" MM_FILE="$tmp_archive" \
+    MM_META="$latest_meta" node -e '
+      const fs = require("fs");
+      const archiveLib = require(process.env.MM_LIB);
+
+      let archive;
+      try { archive = JSON.parse(fs.readFileSync(process.env.MM_FILE, "utf8")); }
+      catch (err) { console.log("FAIL|latest.json is not readable JSON"); process.exit(0); }
+
+      const verification = archiveLib.verifyArchive(archive);
+      const summary = archiveLib.summarizeArchive(archive);
+
+      let ageHours = null;
+      try {
+        const meta = JSON.parse(process.env.MM_META);
+        ageHours = (Date.now() - Date.parse(meta.LastModified)) / 3600000;
+      } catch (e) { /* no age available */ }
+
+      if (!verification.ok) {
+        console.log("FAIL|archive does NOT verify: " + verification.problems.join("; "));
+      } else {
+        console.log("PASS|archive verifies: " + summary.entries + " entries, " +
+          summary.photos + " attachments, " + summary.words + " words");
+        if (summary.earliest) {
+          console.log("NOTE|covering " + summary.earliest + " to " + summary.latest);
+        }
+      }
+      if (ageHours !== null) {
+        const label = ageHours < 1
+          ? Math.round(ageHours * 60) + " minutes old"
+          : Math.round(ageHours) + " hours old";
+        // Nightly, so anything past ~26h means a run was missed.
+        console.log((ageHours > 26 ? "FAIL|" : "PASS|") + "last archive is " + label);
+      }
+    ' | while IFS="|" read -r verdict message; do
+      case "$verdict" in
+        PASS) pass "$message" ;;
+        FAIL) fail "$message" ;;
+        *)    note "$message" ;;
+      esac
+    done
+
+    rm -f "$tmp_archive"
   fi
 fi
 
