@@ -10,10 +10,32 @@ const fc = require('fast-check');
 const media = require('../lib/media');
 
 describe('content types', () => {
-  test('accepts the image types we allow', () => {
+  test('accepts every type on the allow-list', () => {
     for (const type of Object.keys(media.CONTENT_TYPES)) {
       expect(media.isAllowedContentType(type)).toBe(true);
     }
+  });
+
+  test('accepts the audio containers MediaRecorder actually produces', () => {
+    // Chrome and Android give webm; Safari and iOS give mp4. Rejecting either
+    // means half the devices cannot record at all.
+    expect(media.isAllowedContentType('audio/webm')).toBe(true);
+    expect(media.isAllowedContentType('audio/mp4')).toBe(true);
+  });
+
+  test('ignores the codec parameter MediaRecorder appends', () => {
+    // MediaRecorder reports "audio/webm;codecs=opus", never a bare type.
+    expect(media.isAllowedContentType('audio/webm;codecs=opus')).toBe(true);
+    expect(media.baseContentType('audio/webm;codecs=opus')).toBe('audio/webm');
+    expect(media.extensionFor('audio/webm;codecs=opus')).toBe('webm');
+    expect(media.kindFor('audio/webm;codecs=opus')).toBe('audio');
+  });
+
+  test('separates images from audio by kind', () => {
+    expect(media.kindFor('image/jpeg')).toBe('image');
+    expect(media.kindFor('audio/mp4')).toBe('audio');
+    expect(media.kindFor('video/mp4')).toBe('');
+    expect(media.kindFor('nonsense')).toBe('');
   });
 
   test('is case-insensitive', () => {
@@ -26,6 +48,11 @@ describe('content types', () => {
     }
   });
 
+  test('a codec parameter cannot smuggle in a disallowed type', () => {
+    expect(media.isAllowedContentType('video/mp4;codecs=avc1')).toBe(false);
+    expect(media.isAllowedContentType('text/html;charset=utf-8')).toBe(false);
+  });
+
   test('image/svg+xml stays out - SVG is script-capable', () => {
     expect(media.isAllowedContentType('image/svg+xml')).toBe(false);
   });
@@ -34,6 +61,8 @@ describe('content types', () => {
     expect(media.extensionFor('image/jpeg')).toBe('jpg');
     expect(media.extensionFor('image/png')).toBe('png');
     expect(media.extensionFor('image/heic')).toBe('heic');
+    expect(media.extensionFor('audio/webm')).toBe('webm');
+    expect(media.extensionFor('audio/mp4')).toBe('m4a'); // not "mp4" - it is audio
     expect(media.extensionFor('nonsense')).toBe('bin');
   });
 });
@@ -120,7 +149,9 @@ describe('validateMedia', () => {
 
     const fromObjects = media.validateMedia(
       [{ key: key(1), contentType: 'image/jpeg' }], 'mana');
-    expect(fromObjects.value[0]).toEqual({ key: key(1), contentType: 'image/jpeg' });
+    expect(fromObjects.value[0]).toEqual({
+      key: key(1), contentType: 'image/jpeg', kind: 'image', duration: 0,
+    });
   });
 
   test('drops a disallowed contentType but keeps the key', () => {
@@ -149,6 +180,31 @@ describe('validateMedia', () => {
     expect(media.validateMedia(exactly, 'mana').ok).toBe(true);
   });
 
+  test('carries a voice note\'s duration, clamped', () => {
+    const audioKey = 'media/mana/2026-09/note1.webm';
+    const result = media.validateMedia(
+      [{ key: audioKey, contentType: 'audio/webm;codecs=opus', duration: 42.7 }], 'mana');
+
+    expect(result.ok).toBe(true);
+    // Floored, not rounded - a label that overstates the length reads as a
+    // bug next to the player's own figure.
+    expect(result.value[0]).toEqual({
+      key: audioKey, contentType: 'audio/webm', kind: 'audio', duration: 42,
+    });
+  });
+
+  test('refuses to trust an absurd or malformed duration', () => {
+    const audioKey = 'media/mana/2026-09/note1.webm';
+    const check = (duration) => media.validateMedia(
+      [{ key: audioKey, contentType: 'audio/webm', duration }], 'mana').value[0].duration;
+
+    expect(check(99999999)).toBe(24 * 60 * 60); // clamped to a day
+    expect(check(-5)).toBe(0);
+    expect(check('a while')).toBe(0);
+    expect(check(undefined)).toBe(0);
+    expect(check(Infinity)).toBe(0);
+  });
+
   test('rejects a non-list', () => {
     expect(media.validateMedia('not a list', 'mana').ok).toBe(false);
     expect(media.validateMedia({ key: key(1) }, 'mana').ok).toBe(false);
@@ -166,6 +222,17 @@ describe('validatePresignRequest', () => {
     const result = media.validatePresignRequest({ contentType: 'image/jpeg', size: 2_000_000 });
     expect(result.ok).toBe(true);
     expect(result.value.contentType).toBe('image/jpeg');
+    expect(result.value.kind).toBe('image');
+  });
+
+  test('accepts a recording, codec parameter and all', () => {
+    const result = media.validatePresignRequest({
+      contentType: 'audio/webm;codecs=opus', size: 300_000,
+    });
+    expect(result.ok).toBe(true);
+    // The parameter is stripped, so the key gets a clean extension.
+    expect(result.value.contentType).toBe('audio/webm');
+    expect(result.value.kind).toBe('audio');
   });
 
   test('rejects a disallowed type', () => {

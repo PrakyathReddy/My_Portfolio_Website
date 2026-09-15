@@ -611,3 +611,66 @@ button, input, textarea { font: inherit; color: inherit; }
   background: rgba(255, 255, 255, .12);
 }
 .lightbox-close:hover { background: rgba(255, 255, 255, .24); color: #fff; }
+
+/* --- Voice notes ----------------------------------------------------------
+   A recording has nothing to look at, so its chip carries a play glyph and a
+   length instead of a thumbnail. */
+
+.attach-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin: .5rem 0; }
+
+#record-btn { display: inline-flex; align-items: center; gap: .45rem; }
+
+.record-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  /* Muted when idle. A red dot on a button that is not recording reads as
+     "recording now", which is exactly the wrong thing to say. */
+  background: var(--ink-faint);
+  flex: none;
+  transition: background-color .15s;
+}
+#record-btn.is-recording .record-dot { background: var(--danger); }
+#record-btn.is-recording {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+#record-btn.is-recording .record-dot { animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.photo-chip.is-audio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--accent-soft);
+  border: 1px solid var(--rule-strong);
+  cursor: pointer;
+}
+.photo-chip.is-audio .chip-glyph { font-size: 1.1rem; color: var(--accent); }
+.photo-chip.is-audio .chip-length {
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.entry-voice {
+  margin-top: .7rem;
+  padding: .6rem .7rem;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+.entry-voice-label {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: .35rem;
+  font-variant-numeric: tabular-nums;
+}
+.entry-voice-player { width: 100%; height: 34px; display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  #record-btn.is-recording .record-dot { animation: none; opacity: .6; }
+}

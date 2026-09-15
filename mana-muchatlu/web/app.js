@@ -31,6 +31,24 @@
 
   var MAX_PHOTOS = 10;
 
+  // MediaRecorder gives a different container per browser and will not
+  // negotiate: Chrome/Android produce webm/opus, Safari/iOS produce mp4.
+  // Ask for what this browser actually supports rather than guessing.
+  var AUDIO_TYPES = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ];
+
+  var recorder = {
+    media: null,      // MediaRecorder
+    stream: null,     // MediaStream, so the mic can be released
+    chunks: [],
+    startedAt: 0,
+    timer: null,
+  };
+
   var $ = function (id) { return document.getElementById(id); };
 
   /* --- Storage (never throws) ---------------------------------------------
@@ -360,7 +378,11 @@
     }
 
     if (entry.media && entry.media.length) {
-      card.appendChild(renderPhotoGrid(entry));
+      var images = entry.media.filter(function (m) { return m.kind !== 'audio'; });
+      var audio = entry.media.filter(function (m) { return m.kind === 'audio'; });
+
+      if (images.length) card.appendChild(renderPhotoGrid(images));
+      audio.forEach(function (item) { card.appendChild(renderVoiceNote(item)); });
     }
 
     function open() { openSheet(entry); }
@@ -374,17 +396,17 @@
 
   /* --- Photos -------------------------------------------------------------- */
 
-  function renderPhotoGrid(entry) {
+  function renderPhotoGrid(images) {
     var grid = document.createElement('div');
-    grid.className = 'entry-photos' + (entry.media.length === 1 ? ' is-single' : '');
+    grid.className = 'entry-photos' + (images.length === 1 ? ' is-single' : '');
 
-    entry.media.forEach(function (item, index) {
+    images.forEach(function (item, index) {
       if (!item.url) return;
 
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'entry-photo';
-      button.setAttribute('aria-label', 'Photo ' + (index + 1) + ' of ' + entry.media.length);
+      button.setAttribute('aria-label', 'Photo ' + (index + 1) + ' of ' + images.length);
 
       var img = document.createElement('img');
       img.src = item.url;
@@ -403,6 +425,38 @@
     });
 
     return grid;
+  }
+
+  /**
+   * A voice note on an entry card.
+   *
+   * The browser's own <audio> control, deliberately - it is keyboard
+   * accessible, it handles seeking and buffering, and on a phone it hooks
+   * into the lock screen and the system volume. A hand-built player would be
+   * prettier and worse.
+   */
+  function renderVoiceNote(item) {
+    var wrap = document.createElement('div');
+    wrap.className = 'entry-voice';
+
+    var label = document.createElement('div');
+    label.className = 'entry-voice-label';
+    label.textContent = item.duration
+      ? 'Voice note \u00b7 ' + formatDuration(item.duration)
+      : 'Voice note';
+    wrap.appendChild(label);
+
+    var player = document.createElement('audio');
+    player.controls = true;
+    player.preload = 'none'; // do not pull every recording on a month's load
+    player.src = item.url || '';
+    player.className = 'entry-voice-player';
+    // Playing must not also open the entry for editing.
+    player.addEventListener('click', function (e) { e.stopPropagation(); });
+    wrap.appendChild(player);
+
+    wrap.addEventListener('click', function (e) { e.stopPropagation(); });
+    return wrap;
   }
 
   function openLightbox(url) {
@@ -426,13 +480,18 @@
    * Uploads start as soon as a file is picked rather than on save, so by the
    * time the entry is written the photos are usually already there.
    */
-  function uploadPhoto(file) {
+  function uploadAttachment(file, options) {
+    options = options || {};
     var localId = 'p' + Date.now() + Math.random().toString(36).slice(2, 8);
     var record = {
       localId: localId,
       key: null,
       status: 'uploading',
-      // A local preview shows instantly, before any byte has left the device.
+      kind: options.kind || (String(file.type).indexOf('audio/') === 0 ? 'audio' : 'image'),
+      duration: options.duration || 0,
+      contentType: file.type,
+      // A local preview plays or shows instantly, before any byte has left
+      // the device.
       previewUrl: URL.createObjectURL(file),
     };
     state.draftPhotos.push(record);
@@ -462,7 +521,9 @@
         record.status = 'failed';
         renderDraftPhotos();
         if (err.message !== 'unauthorized') {
-          toast(err.message === 'upload failed' ? 'A photo did not upload' : err.message);
+          toast(err.message === 'upload failed'
+            ? (record.kind === 'audio' ? 'That recording did not upload' : 'A photo did not upload')
+            : err.message);
         }
       });
   }
@@ -489,15 +550,38 @@
     strip.textContent = '';
 
     state.draftPhotos.forEach(function (photo) {
+      var isAudio = photo.kind === 'audio';
       var chip = document.createElement('div');
       chip.className = 'photo-chip'
+        + (isAudio ? ' is-audio' : '')
         + (photo.status === 'uploading' ? ' is-uploading' : '')
         + (photo.status === 'failed' ? ' is-failed' : '');
 
-      var img = document.createElement('img');
-      img.src = photo.previewUrl || '';
-      img.alt = '';
-      chip.appendChild(img);
+      if (isAudio) {
+        // A voice note has nothing to show, so the chip carries its length
+        // and a play control instead of a thumbnail.
+        var glyph = document.createElement('span');
+        glyph.className = 'chip-glyph';
+        glyph.textContent = '\u25B6';
+        glyph.setAttribute('aria-hidden', 'true');
+        chip.appendChild(glyph);
+
+        var length = document.createElement('span');
+        length.className = 'chip-length';
+        length.textContent = formatDuration(photo.duration);
+        chip.appendChild(length);
+
+        chip.addEventListener('click', function (event) {
+          if (event.target.closest('.photo-remove')) return;
+          playPreview(photo.previewUrl);
+        });
+        chip.title = 'Voice note, ' + formatDuration(photo.duration);
+      } else {
+        var img = document.createElement('img');
+        img.src = photo.previewUrl || '';
+        img.alt = '';
+        chip.appendChild(img);
+      }
 
       var remove = document.createElement('button');
       remove.type = 'button';
@@ -513,8 +597,22 @@
     var remaining = MAX_PHOTOS - state.draftPhotos.length;
     $('add-photo-btn').disabled = remaining <= 0;
     $('add-photo-btn').textContent = remaining <= 0
-      ? 'Ten photos is the limit'
-      : (state.draftPhotos.length ? 'Add more' : 'Add photos');
+      ? 'Ten attachments is the limit'
+      : (state.draftPhotos.some(function (p) { return p.kind !== 'audio'; })
+          ? 'Add more' : 'Add photos');
+
+    $('record-btn').hidden = !canRecord();
+    $('record-btn').disabled = remaining <= 0 && !isRecording();
+    renderRecordButton();
+  }
+
+  /** Play a draft recording back before it is saved. */
+  var previewAudio = null;
+  function playPreview(url) {
+    if (!url) return;
+    if (previewAudio) previewAudio.pause();
+    previewAudio = new Audio(url);
+    previewAudio.play().catch(function () { toast('Could not play that'); });
   }
 
   function handlePhotoPick(event) {
@@ -528,14 +626,135 @@
       files = files.slice(0, room);
     }
 
-    files.forEach(uploadPhoto);
+    files.forEach(function (file) { uploadAttachment(file); });
   }
 
-  /** Keys for the photos that finished uploading. */
+  /**
+   * The attachments that finished uploading, as the API expects them.
+   * Objects rather than bare keys, so a voice note keeps its length - the
+   * player can label itself before the audio has loaded.
+   */
   function draftMediaKeys() {
     return state.draftPhotos
       .filter(function (photo) { return photo.status === 'done' && photo.key; })
-      .map(function (photo) { return photo.key; });
+      .map(function (photo) {
+        return {
+          key: photo.key,
+          contentType: photo.contentType || '',
+          duration: photo.duration || 0,
+        };
+      });
+  }
+
+  /* --- Voice notes --------------------------------------------------------- */
+
+  function supportedAudioType() {
+    if (typeof MediaRecorder === 'undefined') return '';
+    for (var i = 0; i < AUDIO_TYPES.length; i++) {
+      if (MediaRecorder.isTypeSupported(AUDIO_TYPES[i])) return AUDIO_TYPES[i];
+    }
+    // Some browsers support recording but report nothing; let the default win.
+    return '';
+  }
+
+  function canRecord() {
+    return Boolean(
+      navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      typeof MediaRecorder !== 'undefined'
+    );
+  }
+
+  function formatDuration(seconds) {
+    var total = Math.max(0, Math.round(seconds));
+    var mins = Math.floor(total / 60);
+    var secs = total % 60;
+    return mins + ':' + String(secs).padStart(2, '0');
+  }
+
+  function isRecording() {
+    return Boolean(recorder.media && recorder.media.state === 'recording');
+  }
+
+  function startRecording() {
+    if (state.draftPhotos.length >= MAX_PHOTOS) {
+      toast('Ten attachments is the limit');
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      var mimeType = supportedAudioType();
+      recorder.stream = stream;
+      recorder.chunks = [];
+      recorder.media = mimeType
+        ? new MediaRecorder(stream, { mimeType: mimeType })
+        : new MediaRecorder(stream);
+
+      recorder.media.addEventListener('dataavailable', function (event) {
+        if (event.data && event.data.size) recorder.chunks.push(event.data);
+      });
+
+      recorder.media.addEventListener('stop', function () {
+        // The recorder's own mimeType is authoritative - it may differ from
+        // what we asked for.
+        var type = recorder.media.mimeType || mimeType || 'audio/webm';
+        var blob = new Blob(recorder.chunks, { type: type });
+        var seconds = (Date.now() - recorder.startedAt) / 1000;
+
+        releaseMicrophone();
+
+        if (blob.size > 0 && seconds >= 0.5) {
+          uploadAttachment(blob, { duration: seconds, kind: 'audio' });
+        } else {
+          toast('That was too short to keep');
+        }
+      });
+
+      recorder.startedAt = Date.now();
+      recorder.media.start();
+      renderRecordButton();
+
+      recorder.timer = setInterval(renderRecordButton, 250);
+    }).catch(function () {
+      // Denied, or no microphone. Either way there is nothing to retry.
+      toast('No microphone available');
+    });
+  }
+
+  function stopRecording() {
+    if (isRecording()) recorder.media.stop();
+    clearInterval(recorder.timer);
+    recorder.timer = null;
+    renderRecordButton();
+  }
+
+  /** Release the mic so the browser's recording indicator goes away. */
+  function releaseMicrophone() {
+    if (recorder.stream) {
+      recorder.stream.getTracks().forEach(function (track) { track.stop(); });
+    }
+    recorder.stream = null;
+    recorder.media = null;
+    recorder.chunks = [];
+    clearInterval(recorder.timer);
+    recorder.timer = null;
+    renderRecordButton();
+  }
+
+  function renderRecordButton() {
+    var button = $('record-btn');
+    var label = $('record-label');
+    if (!button) return;
+
+    if (isRecording()) {
+      button.classList.add('is-recording');
+      label.textContent = 'Stop ' + formatDuration((Date.now() - recorder.startedAt) / 1000);
+    } else {
+      button.classList.remove('is-recording');
+      label.textContent = state.draftPhotos.some(function (p) { return p.kind === 'audio'; })
+        ? 'Record another'
+        : 'Record a note';
+    }
   }
 
   /* --- Loading ------------------------------------------------------------- */
@@ -602,6 +821,9 @@
           localId: 'existing' + index,
           key: item.key,
           status: 'done',
+          kind: item.kind || 'image',
+          duration: item.duration || 0,
+          contentType: item.contentType || '',
           previewUrl: item.url || '',
         };
       });
@@ -616,6 +838,11 @@
   }
 
   function closeSheet() {
+    // Leaving the mic live after the sheet closes would keep the browser's
+    // recording indicator on with nothing to show for it.
+    if (isRecording()) recorder.media.stop();
+    releaseMicrophone();
+
     $('sheet-backdrop').hidden = true;
     clearDraftPhotos();
     renderDraftPhotos();
@@ -626,7 +853,12 @@
 
     var entryId = $('entry-id').value;
 
-    // Saving while a photo is still in flight would silently drop it.
+    if (isRecording()) {
+      toast('Stop the recording first');
+      return;
+    }
+
+    // Saving while an attachment is still in flight would silently drop it.
     var stillUploading = state.draftPhotos.some(function (photo) {
       return photo.status === 'uploading';
     });
@@ -742,6 +974,11 @@
 
     $('add-photo-btn').addEventListener('click', function () { $('photo-input').click(); });
     $('photo-input').addEventListener('change', handlePhotoPick);
+
+    $('record-btn').addEventListener('click', function () {
+      if (isRecording()) stopRecording();
+      else startRecording();
+    });
 
     $('lightbox-close').addEventListener('click', closeLightbox);
     $('lightbox').addEventListener('click', function (e) {

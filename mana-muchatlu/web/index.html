@@ -131,11 +131,17 @@
                 placeholder="Write it down before it fades..."></textarea>
 
       <fieldset class="photo-field">
-        <legend class="field-label">Photos <span class="optional">up to 10</span></legend>
+        <legend class="field-label">Photos &amp; voice <span class="optional">up to 10</span></legend>
         <div id="photo-strip" class="photo-strip"></div>
-        <button type="button" class="btn btn-quiet btn-sm" id="add-photo-btn">
-          Add photos
-        </button>
+        <div class="attach-actions">
+          <button type="button" class="btn btn-quiet btn-sm" id="add-photo-btn">
+            Add photos
+          </button>
+          <button type="button" class="btn btn-quiet btn-sm" id="record-btn" hidden>
+            <span class="record-dot" aria-hidden="true"></span>
+            <span id="record-label">Record a note</span>
+          </button>
+        </div>
         <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple hidden>
       </fieldset>
 

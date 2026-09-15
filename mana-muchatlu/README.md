@@ -20,6 +20,7 @@ the Route53 hosted zone. That isolation is deliberate — see
 | Moods | eight of them, optional |
 | Installable PWA | add to home screen on iOS and Android; no App Store, no `$99/yr` |
 | Photos | up to 10 per entry, uploaded straight to S3; thumbnail grid + full-screen viewer |
+| Voice notes | record in the browser, play back on the entry; same upload path as photos |
 | Dark mode | follows the system |
 | Nightly archive | full JSON snapshot to a separate bucket, verified before it is written |
 | Weekly note | one email: what you wrote, and whether the backup is healthy |
@@ -27,7 +28,21 @@ the Route53 hosted zone. That isolation is deliberate — see
 
 ## Not built yet
 
-Video, voice notes, transcription, offline entry cache.
+Video, voice-note transcription, offline entry cache.
+
+### On transcription
+
+Not built, and worth saying why the plan changed. Originally I costed this
+against the Whisper API, which is about four times cheaper per minute than
+Amazon Transcribe. At ten minutes a week the difference is roughly **$3/year
+versus $12/year** — an argument that stops mattering the moment you notice what
+is being sent. These are two people's private voice notes; keeping them inside
+the same AWS account, under the same IAM boundary as everything else, is worth
+far more than nine dollars. Transcribe when it lands.
+
+The audio is also the artifact, not the transcript. A decade from now the point
+is to hear the voice, not read a paraphrase of it — so playback shipping first
+is the right order regardless.
 
 ## Backups
 
@@ -166,7 +181,7 @@ binds to localhost only, and has nothing to do with the real passphrases —
 those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
-npx jest mana-muchatlu          # 151 unit + property tests
+npx jest mana-muchatlu          # 158 unit + property tests
 node scripts/make-icons.js      # regenerate app icons
 ```
 
