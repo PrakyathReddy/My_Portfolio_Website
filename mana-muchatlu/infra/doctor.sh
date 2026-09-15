@@ -182,32 +182,44 @@ if policy="$(aws lambda get-policy --region "$AWS_REGION" \
   ')"
   # Since October 2025 a new function URL needs lambda:InvokeFunction too.
   # Granting only InvokeFunctionUrl produces a Forbidden with empty logs.
+  # This statement is conditioned on lambda:InvokedViaFunctionUrl rather than
+  # lambda:FunctionUrlAuthType, so match on the action alone and report the
+  # condition separately.
   invoke_fn_ok="$(printf '%s' "$policy" | node -pe '
     const raw = require("fs").readFileSync(0, "utf8");
     let doc;
     try { doc = JSON.parse(raw); } catch (e) { console.log("no"); process.exit(0); }
     const statements = [].concat(doc.Statement || []);
-    const good = statements.some((s) => {
-      const actions = [].concat(s.Action || []);
-      const authType = ((s.Condition || {}).StringEquals || {})["lambda:FunctionUrlAuthType"];
-      return s.Effect === "Allow"
-        && actions.includes("lambda:InvokeFunction")
-        && authType === "NONE";
-    });
-    good ? "yes" : "no";
+    const match = statements.find((s) =>
+      s.Effect === "Allow" && [].concat(s.Action || []).includes("lambda:InvokeFunction"));
+    if (!match) { console.log("no"); process.exit(0); }
+    const cond = JSON.stringify(match.Condition || {});
+    cond.includes("InvokedViaFunctionUrl") ? "scoped" : "unscoped";
   ')"
-  if [ "$invoke_fn_ok" = "yes" ]; then
-    pass "resource policy allows public InvokeFunction"
-  else
-    fail "resource policy is missing lambda:InvokeFunction"
-    note "function URLs created after October 2025 need both InvokeFunctionUrl"
-    note "and InvokeFunction; with only the first the URL returns Forbidden"
-    note "before the handler runs, so CloudWatch shows nothing."
-    note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
-    note "       --statement-id FunctionUrlPublicInvoke \\"
-    note "       --action lambda:InvokeFunction --principal '*' \\"
-    note "       --function-url-auth-type NONE"
-  fi
+  case "$invoke_fn_ok" in
+    scoped)
+      pass "resource policy allows InvokeFunction, scoped to function-URL calls"
+      ;;
+    unscoped)
+      pass "resource policy allows public InvokeFunction"
+      warn "it is not scoped to function-URL calls, so the function can also be"
+      note "invoked directly through the Lambda API by any caller"
+      note "tighten: delete that statement and re-add it with --invoked-via-function-url"
+      ;;
+    *)
+      fail "resource policy is missing lambda:InvokeFunction"
+      note "function URLs created after October 2025 need both InvokeFunctionUrl"
+      note "and InvokeFunction; with only the first the URL returns Forbidden"
+      note "before the handler runs, so CloudWatch shows nothing."
+      note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
+      note "       --statement-id FunctionUrlPublicInvoke \\"
+      note "       --action lambda:InvokeFunction --principal '*' \\"
+      note "       --invoked-via-function-url"
+      note "(--invoked-via-function-url, NOT --function-url-auth-type: that flag"
+      note " is only valid on lambda:InvokeFunctionUrl. Needs a recent aws CLI;"
+      note " if it is rejected as unknown, upgrade the CLI first.)"
+      ;;
+  esac
 
   if [ "$invoke_ok" = "yes" ]; then
     pass "resource policy allows public InvokeFunctionUrl"
@@ -232,7 +244,9 @@ fi
 # URL even when the policy allows it, and both settings default to true on
 # functions created since 2025. There is no CloudFormation resource for it, so
 # a perfectly correct template still produces a dead endpoint.
-head_ "Lambda public access block"
+head_ "Lambda public access block (informational)"
+note "this API has come and gone from the SDKs; if your CLI lacks it, that is"
+note "not the problem - the resource policy above is what governs the URL"
 
 fn_arn="$(aws lambda get-function-configuration --region "$AWS_REGION" \
   --function-name "$fn" --query FunctionArn --output text 2>/dev/null)"

@@ -239,7 +239,12 @@ Resources:
       FunctionName: !Ref ApiFunction
       Action: lambda:InvokeFunction
       Principal: '*'
-      FunctionUrlAuthType: NONE
+      # InvokedViaFunctionUrl, NOT FunctionUrlAuthType - that property is only
+      # valid on lambda:InvokeFunctionUrl and AWS rejects the pair outright.
+      # This condition is what keeps "Principal: *" narrow: without it, any
+      # caller could invoke the function directly through the Lambda API, not
+      # only through the URL.
+      InvokedViaFunctionUrl: true
 
 Outputs:
   ApiEndpoint:
