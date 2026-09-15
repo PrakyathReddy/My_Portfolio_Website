@@ -7,15 +7,10 @@ const JSON_HEADERS = {
   'cache-control': 'no-store',
 };
 
-function corsHeaders(allowedOrigin) {
-  return {
-    'access-control-allow-origin': allowedOrigin || '*',
-    'access-control-allow-headers': 'content-type,authorization',
-    'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-    'access-control-max-age': '86400',
-    vary: 'origin',
-  };
-}
+// No CORS helper here on purpose. The Function URL's own Cors config sets
+// those headers; a handler that set them too would send two
+// Access-Control-Allow-Origin values, which browsers reject outright while
+// curl reports the endpoint perfectly healthy.
 
 function json(statusCode, body, extraHeaders = {}) {
   return {
@@ -64,4 +59,4 @@ function parseBody(event) {
   }
 }
 
-module.exports = { json, corsHeaders, methodOf, pathOf, parseBody };
+module.exports = { json, methodOf, pathOf, parseBody };

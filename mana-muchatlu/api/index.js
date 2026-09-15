@@ -27,32 +27,46 @@ const {
 const auth = require('./lib/auth');
 const entries = require('./lib/entries');
 const { marshallItem, unmarshallItem, marshall } = require('./lib/ddb');
-const { json, corsHeaders, methodOf, pathOf, parseBody } = require('./lib/http');
+const { json, methodOf, pathOf, parseBody } = require('./lib/http');
 
 const TABLE_NAME = process.env.TABLE_NAME;
 const COUPLE_ID = process.env.COUPLE_ID || 'mana';
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const MEMBERS = auth.parseMembers(process.env.MEMBERS);
+// ALLOWED_ORIGIN is still set on the function, but deliberately unread here:
+// the Function URL's Cors config is the single place CORS is decided.
 
 const ddb = new DynamoDBClient({});
 
+/**
+ * CORS is owned entirely by the Function URL's own Cors configuration (see
+ * data-stack.yaml), NOT by this handler.
+ *
+ * When both set the headers, the response carries two
+ * Access-Control-Allow-Origin values and every browser rejects it - while
+ * curl, which sends no Origin and does not check, reports a perfectly healthy
+ * endpoint. That combination (works from the terminal, blocked in the browser)
+ * is what a duplicated CORS header looks like from the outside.
+ *
+ * Letting the URL own it also means preflight is answered by the Lambda
+ * service without invoking this function at all.
+ */
 exports.handler = async (event) => {
-  const cors = corsHeaders(ALLOWED_ORIGIN);
   const method = methodOf(event);
   const path = pathOf(event);
 
+  // Reached only if the Function URL has no Cors config of its own; with one,
+  // the service answers preflight before this runs.
   if (method === 'OPTIONS') {
-    return { statusCode: 204, headers: cors, body: '' };
+    return { statusCode: 204, body: '' };
   }
 
   try {
-    const result = await route(method, path, event);
-    return { ...result, headers: { ...result.headers, ...cors } };
+    return await route(method, path, event);
   } catch (err) {
     // Log the detail, return none of it - error strings leak schema.
     console.error('unhandled error', { path, method, message: err?.message, stack: err?.stack });
-    return json(500, { error: 'something went wrong on our side' }, cors);
+    return json(500, { error: 'something went wrong on our side' });
   }
 };
 

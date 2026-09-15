@@ -315,6 +315,30 @@ if [ -n "$api_endpoint" ] && [ "$api_endpoint" != "None" ]; then
     note "logs: aws logs tail /aws/lambda/${fn} --region ${AWS_REGION} --since 30m"
   fi
 
+  # A plain curl sends no Origin and checks no CORS headers, so it reports a
+  # healthy endpoint that a browser refuses to touch. Ask the way a browser
+  # asks, and count the Access-Control-Allow-Origin headers that come back:
+  # two is as broken as zero, and only the browser ever notices.
+  cors_headers="$(curl -sS -i --max-time 15 \
+    -H "Origin: https://${DOMAIN_NAME}" \
+    "${api_endpoint%/}/health" 2>/dev/null \
+    | tr -d '\r' | grep -ci '^access-control-allow-origin:')"
+
+  case "$cors_headers" in
+    1) pass "browser-style request returns exactly one Access-Control-Allow-Origin" ;;
+    0)
+      fail "no Access-Control-Allow-Origin header on a browser-style request"
+      note "the browser will block this even though curl succeeds"
+      note "fix: ./deploy.sh   (the Function URL's Cors config sets it)"
+      ;;
+    *)
+      fail "${cors_headers} Access-Control-Allow-Origin headers - browsers reject duplicates"
+      note "both the Function URL's Cors config and the handler are setting it."
+      note "CORS belongs to the Function URL alone; the handler must not add it."
+      note "fix: ./deploy.sh api"
+      ;;
+  esac
+
   members_response="$(curl -sS --max-time 15 "${api_endpoint%/}/members" 2>&1)"
   if printf '%s' "$members_response" | grep -q '"members"'; then
     pass "GET /members -> ${members_response}"
