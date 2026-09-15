@@ -581,9 +581,41 @@
       toast('Cannot reach the journal right now');
     });
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(function () { /* non-fatal */ });
-    }
+    registerServiceWorker();
+  }
+
+  /* Register the worker, and reload once when a new one takes over.
+   *
+   * Without this, a browser that has already opened the app keeps running the
+   * old page until it is closed and reopened - which for an installed PWA can
+   * be weeks. The guard on `hadController` means this only fires when one
+   * worker replaces another, never on a first install, where a reload would
+   * just be a visible flicker for no gain. */
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    var hadController = Boolean(navigator.serviceWorker.controller);
+    var reloading = false;
+
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.register('sw.js').then(function (registration) {
+      // Ask explicitly rather than relying on the browser's own update
+      // heuristics, which are throttled and vary between engines. An
+      // installed PWA can sit for weeks without a cold start, so the
+      // foreground check is what actually delivers updates in practice.
+      registration.update().catch(function () { /* offline: try again later */ });
+
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) {
+          registration.update().catch(function () { /* non-fatal */ });
+        }
+      });
+    }).catch(function () { /* non-fatal */ });
   }
 
   if (document.readyState === 'loading') {
