@@ -19,6 +19,7 @@ the Route53 hosted zone. That isolation is deliberate — see
 | Write / edit / delete | both people can edit either entry — it is one shared journal |
 | Moods | eight of them, optional |
 | Installable PWA | add to home screen on iOS and Android; no App Store, no `$99/yr` |
+| Photos | up to 10 per entry, uploaded straight to S3; thumbnail grid + full-screen viewer |
 | Dark mode | follows the system |
 | Nightly archive | full JSON snapshot to a separate bucket, verified before it is written |
 | Weekly note | one email: what you wrote, and whether the backup is healthy |
@@ -26,9 +27,7 @@ the Route53 hosted zone. That isolation is deliberate — see
 
 ## Not built yet
 
-Photos, video, voice notes, transcription, weekly reminders, nightly export,
-offline entry cache. The infrastructure for the first several is already
-provisioned (`MediaBucket`, `BackupBucket`) — the wiring is the next commit.
+Video, voice notes, transcription, offline entry cache.
 
 ---
 
@@ -43,7 +42,10 @@ provisioned (`MediaBucket`, `BackupBucket`) — the wiring is the next commit.
         │  fetch()
         ▼
   Lambda Function URL ──▶ DynamoDB  (single table)
-                     └──▶ S3 media  (presigned, not yet wired)
+                     └──▶ S3 media  (presigned PUT/GET, direct to browser)
+
+  EventBridge ──▶ Archive Lambda ──▶ S3 backup  (nightly snapshot)
+                                 └──▶ SNS        (weekly note)
 ```
 
 **One DynamoDB table, no GSI:**
@@ -63,11 +65,21 @@ the entire design rests on.
 **Zero runtime dependencies.** The Lambda uses Node built-ins plus the AWS SDK
 the runtime already ships. CI never runs `npm install`, the artifact is a few
 KB, and there is no dependency tree to audit. DynamoDB attribute marshalling is
-~40 hand-written lines in `api/lib/ddb.js` for the same reason.
+~40 hand-written lines in `api/lib/ddb.js`, and S3 presigning is SigV4 signed by
+hand in `api/lib/presign.js` — checked against AWS's own published test vector,
+so a refactor that breaks the canonical request fails a test rather than
+producing an opaque S3 rejection.
 
-**Costs.** ~40 writes/month never leaves the DynamoDB free tier. Lambda and
-CloudFront likewise. Realistic bill: **$1–3/month**, mostly the Route53 hosted
-zone already being paid for.
+**Photos never pass through Lambda.** The browser asks for a presigned PUT and
+uploads straight to S3: no request-size limit, no invocation billed for the
+transfer, no base64 round trip. Reads mirror it — the bucket stays private and
+each photo is served through a one-hour presigned GET signed at read time.
+
+**Costs.** ~40 writes/month never leaves the DynamoDB free tier. Lambda,
+CloudFront and SNS likewise. Photos are the only part that grows: roughly
+7GB/year at a few a week, which the 90-day Glacier Instant Retrieval rule keeps
+near **$25 over a decade**. Realistic bill: **$1–3/month**, mostly the Route53
+hosted zone already being paid for.
 
 ---
 
@@ -114,7 +126,7 @@ binds to localhost only, and has nothing to do with the real passphrases —
 those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
-npx jest mana-muchatlu          # 52 unit + property tests
+npx jest mana-muchatlu          # 151 unit + property tests
 node scripts/make-icons.js      # regenerate app icons
 ```
 
