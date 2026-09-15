@@ -5,6 +5,7 @@
 #   ./deploy.sh              full deploy (infra + api + web)
 #   ./deploy.sh web          frontend only (the common case while iterating)
 #   ./deploy.sh api          lambda code + config only
+#   ./deploy.sh archive      run the backup now and report what it wrote
 #
 set -euo pipefail
 
@@ -12,6 +13,8 @@ PROJECT_NAME="${PROJECT_NAME:-mana-muchatlu}"
 DOMAIN_NAME="${DOMAIN_NAME:-mana-muchatlu-shivani.prakyath.dev}"
 AWS_REGION="${AWS_REGION:-us-east-1}" # CloudFront requires us-east-1 certs
 APEX_DOMAIN="${APEX_DOMAIN:-prakyath.dev}"
+# Where the weekly report goes. SNS emails a confirmation link the first time.
+NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${HERE}/.." && pwd)"
@@ -57,7 +60,8 @@ deploy_data_stack() {
     --no-fail-on-empty-changeset \
     --parameter-overrides \
       "ProjectName=${PROJECT_NAME}" \
-      "AllowedOrigin=https://${DOMAIN_NAME}"
+      "AllowedOrigin=https://${DOMAIN_NAME}" \
+      "NotifyEmail=${NOTIFY_EMAIL}"
 }
 
 configure_public_access() {
@@ -100,12 +104,15 @@ configure_public_access() {
 deploy_api_code() {
   log "Packaging API"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-  cp -r "${ROOT}/api/index.js" "${ROOT}/api/lib" "$BUILD_DIR/"
+  cp -r "${ROOT}/api/index.js" "${ROOT}/api/archive.js" "${ROOT}/api/lib" "$BUILD_DIR/"
 
-  # No node_modules: the handler uses only Node built-ins plus the AWS SDK
+  # One bundle, two handlers: the API and the archive share every lib they use,
+  # so shipping them together keeps the two from drifting apart.
+  #
+  # No node_modules: the handlers use only Node built-ins plus the AWS SDK
   # that the Lambda runtime already ships. The artifact is a few KB, so cold
   # starts stay in the low tens of milliseconds.
-  (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js lib)
+  (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js archive.js lib)
 
   log "Uploading API code"
   aws lambda update-function-code \
@@ -157,6 +164,76 @@ deploy_api_code() {
 
   aws lambda wait function-updated \
     --region "$AWS_REGION" --function-name "${PROJECT_NAME}-api"
+
+  # --- archive function: same bytes, its own configuration -----------------
+  log "Uploading archive code"
+  aws lambda update-function-code \
+    --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-archive" \
+    --zip-file "fileb://${BUILD_DIR}/api.zip" \
+    --output text --query 'LastModified'
+
+  aws lambda wait function-updated \
+    --region "$AWS_REGION" --function-name "${PROJECT_NAME}-archive"
+
+  # The archive needs the member list for names in the report. It writes only
+  # publicMembers() into the snapshot, so no hash reaches the backup - there
+  # is a test asserting exactly that.
+  local archive_env backup_bucket topic_arn
+  backup_bucket="$(stack_output "$DATA_STACK" BackupBucketName)"
+  topic_arn="$(stack_output "$DATA_STACK" ReportTopicArn)"
+
+  archive_env="$(mktemp)"
+  chmod 600 "$archive_env"
+  # shellcheck disable=SC2064
+  trap "rm -f '$env_file' '$archive_env'" RETURN
+
+  MM_MEMBERS="$members" MM_TABLE="$table_name" MM_BACKUP="$backup_bucket" \
+  MM_MEDIA="$media_bucket" MM_COUPLE="${COUPLE_ID:-mana}" MM_TOPIC="$topic_arn" \
+  node -e '
+    process.stdout.write(JSON.stringify({ Variables: {
+      TABLE_NAME: process.env.MM_TABLE,
+      BACKUP_BUCKET: process.env.MM_BACKUP,
+      MEDIA_BUCKET: process.env.MM_MEDIA,
+      COUPLE_ID: process.env.MM_COUPLE,
+      TOPIC_ARN: process.env.MM_TOPIC,
+      MEMBERS: process.env.MM_MEMBERS,
+    }}));
+  ' > "$archive_env"
+
+  aws lambda update-function-configuration \
+    --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-archive" \
+    --environment "file://${archive_env}" \
+    --output text --query 'LastModified'
+
+  aws lambda wait function-updated \
+    --region "$AWS_REGION" --function-name "${PROJECT_NAME}-archive"
+}
+
+# Run the backup once, now, rather than finding out at 03:10 whether it works.
+# An untested backup is a rumour; this turns the deploy itself into the test.
+verify_archive() {
+  log "Running the archive once to prove it works"
+
+  local out
+  out="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$out'" RETURN
+
+  if aws lambda invoke \
+       --region "$AWS_REGION" \
+       --function-name "${PROJECT_NAME}-archive" \
+       --payload '{"job":"archive"}' \
+       --cli-binary-format raw-in-base64-out \
+       "$out" --output text --query 'FunctionError' 2>/dev/null | grep -q 'Unhandled'; then
+    echo "  ARCHIVE FAILED:"
+    sed 's/^/    /' "$out"
+    echo "  logs: aws logs tail /aws/lambda/${PROJECT_NAME}-archive --region ${AWS_REGION} --since 10m"
+    return 1
+  fi
+
+  echo "  $(cat "$out")"
 }
 
 deploy_web_stack() {
@@ -228,12 +305,17 @@ case "$TARGET" in
     deploy_data_stack
     deploy_api_code
     configure_public_access
+    verify_archive
     deploy_web_stack
     publish_web
     ;;
   api)
     deploy_api_code
     configure_public_access
+    verify_archive
+    ;;
+  archive)
+    verify_archive
     ;;
   web)
     publish_web
@@ -241,7 +323,7 @@ case "$TARGET" in
   *)
     echo
     echo "  Nothing was deployed: '${TARGET}' is not a valid target."
-    echo "  usage: $0 [all|api|web]   (default: all)"
+    echo "  usage: $0 [all|api|web|archive]   (default: all)"
     echo
     exit 1
     ;;

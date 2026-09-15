@@ -21,6 +21,17 @@ Parameters:
     Default: mana
     Description: Partition key suffix. One value = one shared journal.
 
+  NotifyEmail:
+    Type: String
+    Default: ''
+    Description: >
+      Where the weekly report goes. Leave empty to skip the subscription and
+      add addresses by hand later. SNS sends a confirmation link that must be
+      clicked once before anything is delivered.
+
+Conditions:
+  HasNotifyEmail: !Not [!Equals [!Ref NotifyEmail, '']]
+
 Resources:
   # ---------------------------------------------------------------------------
   # Entries table.
@@ -182,6 +193,147 @@ Resources:
                   - s3:GetObject
                 Resource: !Sub '${MediaBucket.Arn}/media/*'
 
+  # ---------------------------------------------------------------------------
+  # Archive and weekly report.
+  # ---------------------------------------------------------------------------
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-reports'
+      DisplayName: Mana Muchatlu
+
+  ReportSubscription:
+    Type: AWS::SNS::Subscription
+    # Skipped entirely when no address is given, rather than failing the stack.
+    Condition: HasNotifyEmail
+    Properties:
+      TopicArn: !Ref ReportTopic
+      Protocol: email
+      Endpoint: !Ref NotifyEmail
+
+  ArchiveRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-archive:*'
+        - PolicyName: ReadEntries
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Read only. A backup job with write access to the thing it is
+              # backing up is one bug away from being the disaster.
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !GetAtt EntriesTable.Arn
+        - PolicyName: WriteBackups
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${BackupBucket.Arn}/archives/*'
+              # Listing media to count it, never reading or deleting it.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt MediaBucket.Arn
+        - PolicyName: SendReports
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref ReportTopic
+
+  ArchiveLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-archive'
+      RetentionInDays: 90
+
+  ArchiveFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-archive'
+      Runtime: nodejs20.x
+      Handler: archive.handler
+      Role: !GetAtt ArchiveRole.Arn
+      MemorySize: 512
+      # Generous: this reads the whole journal and lists the media bucket.
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EntriesTable
+          BACKUP_BUCKET: !Ref BackupBucket
+          MEDIA_BUCKET: !Ref MediaBucket
+          COUPLE_ID: !Ref CoupleId
+          TOPIC_ARN: !Ref ReportTopic
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            throw new Error('archive code not yet deployed');
+          };
+
+  NightlyArchiveRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-nightly-archive'
+      Description: Snapshot the journal every night
+      # 03:10 UTC - late enough that a day's entries are in, odd minute so it
+      # does not share a spike with every other cron on the hour.
+      ScheduleExpression: 'cron(10 3 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: archive
+          Arn: !GetAtt ArchiveFunction.Arn
+          Input: '{"job":"archive"}'
+
+  WeeklyReportRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-weekly-report'
+      Description: Verify the archive and send the weekly note
+      # Sunday 12:30 UTC - a weekend morning in India, when there is time to
+      # act on a backup warning and appetite to write something.
+      ScheduleExpression: 'cron(30 12 ? * SUN *)'
+      State: ENABLED
+      Targets:
+        - Id: report
+          Arn: !GetAtt ArchiveFunction.Arn
+          Input: '{"job":"report"}'
+
+  NightlyArchivePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ArchiveFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt NightlyArchiveRule.Arn
+
+  WeeklyReportPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ArchiveFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WeeklyReportRule.Arn
+
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -276,3 +428,6 @@ Outputs:
 
   BackupBucketName:
     Value: !Ref BackupBucket
+
+  ReportTopicArn:
+    Value: !Ref ReportTopic

@@ -20,6 +20,8 @@ the Route53 hosted zone. That isolation is deliberate — see
 | Moods | eight of them, optional |
 | Installable PWA | add to home screen on iOS and Android; no App Store, no `$99/yr` |
 | Dark mode | follows the system |
+| Nightly archive | full JSON snapshot to a separate bucket, verified before it is written |
+| Weekly note | one email: what you wrote, and whether the backup is healthy |
 | Offline shell | the app opens without a connection; entries still need one |
 
 ## Not built yet
@@ -76,8 +78,12 @@ Once, on a machine with AWS credentials:
 ```bash
 cd mana-muchatlu/infra
 ./init-secrets.sh     # prompts for passphrases, writes scrypt hashes to SSM
-./deploy.sh           # both stacks, the Lambda, and the site
+NOTIFY_EMAIL=you@example.com ./deploy.sh
 ```
+
+`NOTIFY_EMAIL` subscribes an address to the weekly report. SNS sends one
+confirmation link that must be clicked before anything is delivered; leave the
+variable out to skip it and add addresses later.
 
 The first `deploy.sh` issues an ACM certificate and waits on DNS validation —
 budget 5–30 minutes. Later runs take seconds.
