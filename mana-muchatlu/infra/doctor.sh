@@ -133,6 +133,71 @@ else
   note "fix: ./deploy.sh"
 fi
 
+# --- Function URL authorization -----------------------------------------------
+# A Function URL rejects with a bare "Forbidden" when either of two things is
+# wrong, and the message does not say which: the URL's own AuthType, or the
+# function's resource-based policy. Neither is visible in CloudWatch, because
+# the request never reaches the handler. So check both explicitly.
+head_ "Function URL authorization"
+
+if url_config="$(aws lambda get-function-url-config --region "$AWS_REGION" \
+     --function-name "$fn" --output json 2>/dev/null)"; then
+  auth_type="$(printf '%s' "$url_config" | node -pe \
+    'JSON.parse(require("fs").readFileSync(0,"utf8")).AuthType')"
+  if [ "$auth_type" = "NONE" ]; then
+    pass "AuthType is NONE (the app's own passphrase is the gate)"
+  else
+    fail "AuthType is ${auth_type}, so the browser cannot call it unsigned"
+    note "fix: aws lambda update-function-url-config --function-name ${fn} \\"
+    note "       --region ${AWS_REGION} --auth-type NONE"
+  fi
+
+  cors_origins="$(printf '%s' "$url_config" | node -pe \
+    'const c = JSON.parse(require("fs").readFileSync(0,"utf8"));
+     ((c.Cors && c.Cors.AllowOrigins) || []).join(",")')"
+  if [ -n "$cors_origins" ]; then
+    pass "CORS allows: ${cors_origins}"
+  else
+    warn "no CORS origins configured on the Function URL"
+  fi
+else
+  fail "no Function URL configured on ${fn}"
+fi
+
+if policy="$(aws lambda get-policy --region "$AWS_REGION" \
+     --function-name "$fn" --query Policy --output text 2>/dev/null)"; then
+  invoke_ok="$(printf '%s' "$policy" | node -pe '
+    const raw = require("fs").readFileSync(0, "utf8");
+    let doc;
+    try { doc = JSON.parse(raw); } catch (e) { console.log("unparseable"); process.exit(0); }
+    const statements = [].concat(doc.Statement || []);
+    const good = statements.some((s) => {
+      const actions = [].concat(s.Action || []);
+      const authType = ((s.Condition || {}).StringEquals || {})["lambda:FunctionUrlAuthType"];
+      return s.Effect === "Allow"
+        && actions.includes("lambda:InvokeFunctionUrl")
+        && authType === "NONE";
+    });
+    good ? "yes" : "no";
+  ')"
+  if [ "$invoke_ok" = "yes" ]; then
+    pass "resource policy allows public InvokeFunctionUrl"
+  else
+    fail "resource policy does NOT allow public InvokeFunctionUrl"
+    note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
+    note "       --statement-id FunctionUrlPublicAccess \\"
+    note "       --action lambda:InvokeFunctionUrl --principal '*' \\"
+    note "       --function-url-auth-type NONE"
+  fi
+else
+  fail "the function has NO resource-based policy at all"
+  note "this is the usual cause of a bare Forbidden from a Function URL"
+  note "fix: aws lambda add-permission --function-name ${fn} --region ${AWS_REGION} \\"
+  note "       --statement-id FunctionUrlPublicAccess \\"
+  note "       --action lambda:InvokeFunctionUrl --principal '*' \\"
+  note "       --function-url-auth-type NONE"
+fi
+
 # --- Live endpoints -----------------------------------------------------------
 head_ "Live endpoints"
 

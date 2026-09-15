@@ -218,6 +218,11 @@ Resources:
 
   ApiUrlPermission:
     Type: AWS::Lambda::Permission
+    # Explicit ordering: without it CloudFormation may create the permission
+    # before the URL exists. The stack still reports CREATE_COMPLETE either
+    # way, but the URL can end up answering a bare "Forbidden" that never
+    # reaches the handler and so leaves no trace in CloudWatch.
+    DependsOn: ApiUrl
     Properties:
       FunctionName: !Ref ApiFunction
       Action: lambda:InvokeFunctionUrl
