@@ -7,6 +7,10 @@ distribution, its own subdomain**. It shares nothing with the portfolio except
 the Route53 hosted zone. That isolation is deliberate — see
 [Why it is not at `/journal`](#why-it-is-not-at-journal).
 
+> **Picking this up cold, or pointing an AI tool at it?** Start with
+> **[HANDOFF.md](HANDOFF.md)** — current state, the traps that cost real
+> debugging time, and which decisions look wrong but are not.
+
 ---
 
 ## What works today
@@ -181,7 +185,7 @@ binds to localhost only, and has nothing to do with the real passphrases —
 those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
-npx jest mana-muchatlu          # 158 unit + property tests
+npx jest mana-muchatlu          # 132 tests (whole repo, incl. portfolio: 158)
 node scripts/make-icons.js      # regenerate app icons
 ```
 
