@@ -23,6 +23,16 @@ jobs:
         aws-region: us-east-1
 
     # 3. Sync files to S3 bucket
+    #    mana-muchatlu/* is the private journal app - it deploys to its own
+    #    bucket via deploy-journal.yml and must never land in this public bucket.
     - name: Sync to S3
-      run: | 
-        aws s3 sync . s3://my-devops-portfolio-website --delete --exclude ".git/*" --exclude ".github/*"
+      run: |
+        aws s3 sync . s3://my-devops-portfolio-website --delete \
+          --exclude ".git/*" \
+          --exclude ".github/*" \
+          --exclude "mana-muchatlu/*" \
+          --exclude "node_modules/*" \
+          --exclude "__tests__/*" \
+          --exclude ".kiro/*" \
+          --exclude ".vscode/*" \
+          --exclude ".DS_Store"

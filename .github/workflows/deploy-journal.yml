@@ -1,0 +1,115 @@
+name: Mana Muchatlu
+
+# Separate from deploy.yml on purpose: the journal has its own bucket, its own
+# distribution and its own blast radius. A portfolio change must never be able
+# to touch it, and vice versa.
+
+on:
+  pull_request:
+    paths:
+      - 'mana-muchatlu/**'
+      - '.github/workflows/deploy-journal.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'mana-muchatlu/**'
+      - '.github/workflows/deploy-journal.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: true
+        default: 'web'
+        type: choice
+        options: [web, api, all]
+
+concurrency:
+  # Never let two deploys race for the same bucket.
+  group: journal-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    # Runs on pull requests too, not just on the way to production - tests that
+    # only gate the deploy are tests that tell you after it is too late.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run journal tests
+        # The API's pure logic - auth, validation, key construction - is what
+        # a bug would be silent in.
+        run: npm run test:journal
+
+      - name: Run portfolio tests
+        # The journal shares this repo, so it also has to leave the portfolio
+        # suite green.
+        run: npm test
+
+      - name: Check shell scripts parse
+        run: |
+          bash -n mana-muchatlu/infra/deploy.sh
+          bash -n mana-muchatlu/infra/init-secrets.sh
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check whether the stacks have been bootstrapped
+        id: check
+        # First-time setup needs ./init-secrets.sh, which is interactive by
+        # design - passphrases should be typed by a person, not sat in CI
+        # secrets. So until a human has bootstrapped, this job reports that
+        # plainly and succeeds. A merge should not fail CI for the entirely
+        # expected reason that the infrastructure does not exist yet.
+        run: |
+          ready=true
+          for stack in mana-muchatlu-data mana-muchatlu-web; do
+            if ! aws cloudformation describe-stacks --stack-name "$stack" \
+                 --region us-east-1 >/dev/null 2>&1; then
+              echo "::notice::Stack $stack not found - skipping deploy."
+              ready=false
+            fi
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - name: Explain what to do next
+        if: steps.check.outputs.ready != 'true'
+        run: |
+          echo "::notice::Mana Muchatlu is not deployed yet. To bootstrap it, run"
+          echo "::notice::  cd mana-muchatlu/infra && ./init-secrets.sh && ./deploy.sh"
+          echo "::notice::from a machine with AWS credentials. Once both stacks"
+          echo "::notice::exist, pushes to main will deploy the frontend automatically."
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        env:
+          PROJECT_NAME: mana-muchatlu
+          DOMAIN_NAME: mana-muchatlu-shivani.prakyath.dev
+          APEX_DOMAIN: prakyath.dev
+        run: |
+          chmod +x mana-muchatlu/infra/deploy.sh
+          ./mana-muchatlu/infra/deploy.sh "${{ inputs.target || 'web' }}"

@@ -1,0 +1,433 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Mana Muchatlu - data plane. DynamoDB table for entries, S3 buckets for media
+  and backups, and the single Lambda that serves the API behind a Function URL.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: mana-muchatlu
+    Description: Prefix for all resource names.
+
+  AllowedOrigin:
+    Type: String
+    Description: >
+      The exact origin allowed to call the API, e.g.
+      https://mana-muchatlu-shivani.prakyath.dev. Not "*" - this API is for
+      two people and there is no reason for any other page to reach it.
+
+  CoupleId:
+    Type: String
+    Default: mana
+    Description: Partition key suffix. One value = one shared journal.
+
+  NotifyEmail:
+    Type: String
+    Default: ''
+    Description: >
+      Where the weekly report goes. Leave empty to skip the subscription and
+      add addresses by hand later. SNS sends a confirmation link that must be
+      clicked once before anything is delivered.
+
+Conditions:
+  HasNotifyEmail: !Not [!Equals [!Ref NotifyEmail, '']]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Entries table.
+  #
+  # On-demand billing because the load is ~10 writes a week: provisioned
+  # capacity would mean paying for idle RCUs 24/7 to serve a workload that is
+  # six orders of magnitude below one unit of capacity.
+  # ---------------------------------------------------------------------------
+  EntriesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${ProjectName}-entries'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        # 35 days of per-second restore. This is the cheapest insurance in the
+        # entire stack and it covers the failure mode a nightly export cannot:
+        # a bad deploy that quietly corrupts entries between two backups.
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ---------------------------------------------------------------------------
+  # Media bucket - photos, video, voice notes. Provisioned now, wired up next.
+  # ---------------------------------------------------------------------------
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-media-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        # Versioning turns "she deleted the photo by accident" from a
+        # catastrophe into a one-line CLI restore.
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveOldMedia
+            Status: Enabled
+            Transitions:
+              # Media older than 90 days is almost never re-fetched. Glacier
+              # Instant Retrieval is ~6x cheaper and still serves in
+              # milliseconds, which takes a decade of media from ~$100 to ~$25.
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 90
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedMethods: [GET, PUT, HEAD]
+            AllowedHeaders: ['*']
+            MaxAge: 3000
+
+  # ---------------------------------------------------------------------------
+  # Backup bucket - the "even if this app dies" escape hatch.
+  # ---------------------------------------------------------------------------
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-backup-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: KeepBackupsCheap
+            Status: Enabled
+            Transitions:
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 30
+            NoncurrentVersionExpirationInDays: 365
+
+  # ---------------------------------------------------------------------------
+  # API Lambda.
+  # ---------------------------------------------------------------------------
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-api:*'
+        - PolicyName: ReadWriteEntries
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Scoped to this one table, and to only the four verbs the
+              # handler actually calls. No Scan, no DeleteTable.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt EntriesTable.Arn
+        - PolicyName: ReadWriteMedia
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # A presigned URL carries the signer's authority, so this role's
+              # permissions are the real ceiling on what any link can do. Two
+              # verbs, one prefix: no ListBucket, no DeleteObject, nothing
+              # outside media/.
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${MediaBucket.Arn}/media/*'
+
+  # ---------------------------------------------------------------------------
+  # Archive and weekly report.
+  # ---------------------------------------------------------------------------
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-reports'
+      DisplayName: Mana Muchatlu
+
+  ReportSubscription:
+    Type: AWS::SNS::Subscription
+    # Skipped entirely when no address is given, rather than failing the stack.
+    Condition: HasNotifyEmail
+    Properties:
+      TopicArn: !Ref ReportTopic
+      Protocol: email
+      Endpoint: !Ref NotifyEmail
+
+  ArchiveRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-archive:*'
+        - PolicyName: ReadEntries
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Read only. A backup job with write access to the thing it is
+              # backing up is one bug away from being the disaster.
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !GetAtt EntriesTable.Arn
+        - PolicyName: WriteBackups
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${BackupBucket.Arn}/archives/*'
+              # Listing media to count it, never reading or deleting it.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt MediaBucket.Arn
+        - PolicyName: SendReports
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref ReportTopic
+
+  ArchiveLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-archive'
+      RetentionInDays: 90
+
+  ArchiveFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-archive'
+      Runtime: nodejs20.x
+      Handler: archive.handler
+      Role: !GetAtt ArchiveRole.Arn
+      MemorySize: 512
+      # Generous: this reads the whole journal and lists the media bucket.
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EntriesTable
+          BACKUP_BUCKET: !Ref BackupBucket
+          MEDIA_BUCKET: !Ref MediaBucket
+          COUPLE_ID: !Ref CoupleId
+          TOPIC_ARN: !Ref ReportTopic
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            throw new Error('archive code not yet deployed');
+          };
+
+  NightlyArchiveRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-nightly-archive'
+      Description: Snapshot the journal every night
+      # 03:10 UTC - late enough that a day's entries are in, odd minute so it
+      # does not share a spike with every other cron on the hour.
+      ScheduleExpression: 'cron(10 3 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: archive
+          Arn: !GetAtt ArchiveFunction.Arn
+          Input: '{"job":"archive"}'
+
+  WeeklyReportRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-weekly-report'
+      Description: Verify the archive and send the weekly note
+      # Sunday 12:30 UTC - a weekend morning in India, when there is time to
+      # act on a backup warning and appetite to write something.
+      ScheduleExpression: 'cron(30 12 ? * SUN *)'
+      State: ENABLED
+      Targets:
+        - Id: report
+          Arn: !GetAtt ArchiveFunction.Arn
+          Input: '{"job":"report"}'
+
+  NightlyArchivePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ArchiveFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt NightlyArchiveRule.Arn
+
+  WeeklyReportPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ArchiveFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WeeklyReportRule.Arn
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-api'
+      RetentionInDays: 30
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-api'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ApiRole.Arn
+      MemorySize: 512
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EntriesTable
+          MEDIA_BUCKET: !Ref MediaBucket
+          COUPLE_ID: !Ref CoupleId
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+          # SESSION_SECRET and MEMBERS are deliberately absent here. They hold
+          # secrets, and anything in a CloudFormation template is readable by
+          # anyone with describe-stacks. deploy.sh pulls them from SSM
+          # SecureString and sets them with update-function-configuration, so
+          # they never touch the template or the repo.
+      Code:
+        ZipFile: |
+          // Placeholder. Real code is shipped by infra/deploy.sh via
+          // update-function-code; CloudFormation owns the plumbing, the
+          // deploy script owns the bytes.
+          exports.handler = async () => ({
+            statusCode: 503,
+            body: JSON.stringify({ error: 'API code not yet deployed' }),
+          });
+
+  ApiUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE # Authorization is the app's HMAC session token.
+      Cors:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET, POST, PATCH, DELETE]
+        AllowHeaders: [content-type, authorization]
+        MaxAge: 86400
+
+  # Two permissions, not one. Since October 2025 a newly created function URL
+  # needs lambda:InvokeFunction as well as lambda:InvokeFunctionUrl; with only
+  # the latter the URL answers a bare "Forbidden" before the handler runs, so
+  # nothing appears in CloudWatch. Both are scoped by FunctionUrlAuthType so
+  # they apply to function-URL invocations only, not to arbitrary callers.
+  ApiUrlPermission:
+    Type: AWS::Lambda::Permission
+    # Explicit ordering: without it CloudFormation may create the permission
+    # before the URL exists. The stack reports CREATE_COMPLETE either way.
+    DependsOn: ApiUrl
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  ApiUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: ApiUrl
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      # InvokedViaFunctionUrl, NOT FunctionUrlAuthType - that property is only
+      # valid on lambda:InvokeFunctionUrl and AWS rejects the pair outright.
+      # This condition is what keeps "Principal: *" narrow: without it, any
+      # caller could invoke the function directly through the Lambda API, not
+      # only through the URL.
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  ApiEndpoint:
+    Description: Function URL - put this in web/config.js
+    Value: !GetAtt ApiUrl.FunctionUrl
+    Export:
+      Name: !Sub '${ProjectName}-api-endpoint'
+
+  TableName:
+    Value: !Ref EntriesTable
+    Export:
+      Name: !Sub '${ProjectName}-table'
+
+  MediaBucketName:
+    Value: !Ref MediaBucket
+
+  BackupBucketName:
+    Value: !Ref BackupBucket
+
+  ReportTopicArn:
+    Value: !Ref ReportTopic
