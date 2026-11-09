@@ -1,5 +1,12 @@
 # AWS Static Website Hosting
 
+> This repo holds two separate things:
+> the **portfolio** (this file, deployed to `prakyath.dev`), and
+> **[mana-muchatlu/](mana-muchatlu/)** — a private journal app on its own
+> subdomain and its own AWS resources. They share only the Route53 zone.
+> Working on the journal? Read **[mana-muchatlu/HANDOFF.md](mana-muchatlu/HANDOFF.md)** first.
+
+
 This is a static website hosted on AWS with a custom domain name, HTTPS security and Global Content Delivery. 
 
 This project leverages:

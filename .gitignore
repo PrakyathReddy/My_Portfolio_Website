@@ -1,1 +1,8 @@
 node_modules/
+.DS_Store
+
+# Journal build artifacts and generated config.
+# config.js is written by infra/deploy.sh from a CloudFormation output -
+# committing it would create a second source of truth that goes stale.
+mana-muchatlu/.build/
+mana-muchatlu/web/config.js

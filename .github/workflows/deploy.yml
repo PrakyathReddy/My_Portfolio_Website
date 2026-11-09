@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'mana-muchatlu/**'
+      - '.github/workflows/deploy-journal.yml'
 
 permissions:
   contents: read
@@ -32,7 +35,13 @@ jobs:
           aws s3 sync . s3://my-devops-portfolio-website \
             --delete \
             --exclude ".git/*" \
-            --exclude ".github/*"
+            --exclude ".github/*" \
+            --exclude "mana-muchatlu/*" \
+            --exclude "node_modules/*" \
+            --exclude "__tests__/*" \
+            --exclude ".kiro/*" \
+            --exclude ".vscode/*" \
+            --exclude ".DS_Store"
 
       - name: Invalidate CloudFront cache
         env:

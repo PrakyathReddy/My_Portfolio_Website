@@ -521,6 +521,29 @@ section {
     font-size: var(--font-size-sm);
 }
 
+.footer-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+/* Quiet by default - it is a private link, not a call to action. */
+.footer-mark {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-secondary);
+    opacity: 0.4;
+    padding: var(--spacing-xs);
+    border-radius: 50%;
+    transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.footer-mark:hover,
+.footer-mark:focus-visible {
+    opacity: 1;
+    color: var(--primary-color);
+}
+
 .back-to-top {
     background: none;
     border: none;
