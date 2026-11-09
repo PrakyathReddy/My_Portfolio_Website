@@ -2,179 +2,115 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#f7f3ee" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)">
-  <title>Mana Muchatlu</title>
-
+  <meta name="theme-color" content="#fbf8f7">
+  <meta name="description" content="Mana Muchatlu — mana chinna safe space.">
+  <title>Mana Muchatlu ♥</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Muchatlu">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-
+  <link rel="preload" href="fonts/great-vibes.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="app.css">
   <script src="config.js"></script>
+  <script src="ui.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
+<svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><path d="m8 5 1.5-2h5L16 5h4a2 2 0 0 1 2 2v13H2V7a2 2 0 0 1 2-2z"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="17" rx="3"/><path d="M7 2v6M17 2v6M3 11h18M8 15h.01M12 15h.01M16 15h.01M8 18h.01M12 18h.01"/></symbol>
+  <symbol id="i-today" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="17" rx="3"/><path d="M7 2v6M17 2v6M3 11h18"/></symbol>
+  <symbol id="i-memories" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="15.5" cy="8.5" r="1.5"/><path d="m3 17 5-5 6 6 3-3 4 4"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14z"/></symbol>
+</defs></svg>
+<a class="skip-link" href="#page-content">Skip to journal</a>
 
-<!-- Sign in ------------------------------------------------------------- -->
 <main id="signin-view" class="signin" hidden>
   <div class="signin-card">
-    <h1 class="wordmark" lang="te">మన ముచ్చట్లు</h1>
-
+    <h1 class="wordmark">Mana Muchatlu <span class="brand-heart" aria-hidden="true">♥</span></h1>
+    <p class="signin-intro">Mana chinna safe space.</p>
+    <p class="signin-question">Ee roju evaru raasthunnaru?</p>
     <div id="member-picker" class="member-picker" role="group" aria-label="Who is writing?"></div>
-
     <form id="signin-form" class="signin-form" hidden>
-      <label class="field-label" for="passphrase">
-        Passphrase for <span id="signin-name"></span>
-      </label>
-      <input type="password" id="passphrase" name="passphrase"
-             autocomplete="current-password" required
-             placeholder="your passphrase">
+      <label class="field-label" for="passphrase">Passphrase for <span id="signin-name"></span></label>
+      <div class="password-wrap"><input type="password" id="passphrase" name="passphrase" autocomplete="current-password" placeholder="Your passphrase" required><button type="button" id="show-password" class="text-btn" aria-label="Show passphrase">Show</button></div>
       <button type="submit" class="btn btn-primary" id="signin-submit">Open our journal</button>
       <button type="button" class="btn btn-quiet" id="signin-back">Not me</button>
     </form>
-
     <p id="signin-error" class="error-text" role="alert" hidden></p>
+    <p class="signin-foot"><svg class="icon"><use href="#i-lock"/></svg> Just the two of us.</p>
   </div>
 </main>
 
-<!-- Journal -------------------------------------------------------------- -->
 <div id="app-view" hidden>
-  <header class="app-header">
-    <div class="app-header-inner">
-      <h1 class="app-title" lang="te">మన ముచ్చట్లు</h1>
-      <div class="app-header-right">
-        <div id="current-avatar" class="avatar avatar-sm" title=""></div>
-        <button type="button" class="icon-btn" id="signout-btn" aria-label="Sign out">
-          <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
-                  fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
+  <header class="app-header"><div class="app-header-inner">
+    <h1 class="wordmark">Mana Muchatlu <span class="brand-heart" aria-hidden="true">♥</span></h1>
+    <div class="header-right"><button type="button" id="account-btn" class="icon-btn" aria-label="Account"><svg class="icon"><use href="#i-lock"/></svg></button><div id="member-pair" class="member-pair" aria-label="Our journal members"></div></div>
+  </div></header>
+  <main id="page-content" class="app-main" tabindex="-1">
+    <section id="today-page" class="page today-page" aria-label="Ee roju">
+      <div id="composer-home">
+        <form id="entry-form" class="entry-form">
+          <input type="hidden" id="entry-id">
+          <div class="composer-heading">
+            <div class="date-control"><span id="today-date"></span><svg class="icon"><use href="#i-calendar"/></svg><input id="entry-date" type="date" aria-label="Entry date" required></div>
+            <h2>Ee roju ela gadichindi?</h2>
+          </div>
+          <label class="sr-only" for="entry-title">Entry title (optional)</label>
+          <input type="text" id="entry-title" class="title-input" maxlength="200" autocomplete="off" placeholder="A title, if you like">
+          <label class="sr-only" for="entry-body">Your journal entry</label>
+          <textarea id="entry-body" class="body-input" maxlength="20000" rows="9" placeholder="idi mana safe space… judgement-free. Emaina raskovachu"></textarea>
+          <fieldset class="photo-field"><legend class="sr-only">Photos and voice notes, up to ten attachments</legend>
+            <div id="photo-strip" class="photo-strip"></div>
+            <div class="attach-actions"><button type="button" id="add-photo-btn" class="attachment-btn"><svg class="icon"><use href="#i-photo"/></svg><span id="photo-label">Photo</span></button><span class="attachment-divider" aria-hidden="true"></span><button type="button" id="record-btn" class="attachment-btn" hidden><svg class="icon"><use href="#i-mic"/></svg><span class="record-dot" aria-hidden="true"></span><span id="record-label">Voice note</span></button></div>
+            <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple hidden>
+          </fieldset>
+          <fieldset class="mood-field" aria-describedby="mood-help"><legend class="sr-only">Choose a mood (required)</legend>
+            <div class="mood-heading"><span id="mood-label">Ee roju mood ela undi? <span class="required-note">required</span></span><button type="button" id="more-moods" class="text-btn" aria-haspopup="dialog">More moods <span aria-hidden="true">›</span></button></div>
+            <div id="mood-chips" class="mood-chips" role="group" aria-label="Quick moods"></div>
+            <p id="mood-help" class="mood-help">Oka mood choose chesko, save cheyyadaniki.</p>
+          </fieldset>
+          <p id="entry-error" class="error-text" role="alert" hidden></p>
+          <div class="save-actions"><button type="submit" class="btn btn-primary save-btn" id="save-btn" disabled>Save entry</button><div class="edit-actions"><button type="button" class="text-btn" id="cancel-btn" hidden>Cancel</button><button type="button" class="text-btn btn-danger" id="delete-btn" hidden>Delete entry</button></div></div>
+        </form>
       </div>
-    </div>
-  </header>
-
-  <main class="app-main">
-    <section class="calendar-section" aria-label="Calendar">
-      <div class="month-nav">
-        <button type="button" class="icon-btn" id="prev-month" aria-label="Previous month">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        <h2 id="month-label" class="month-label">&nbsp;</h2>
-        <button type="button" class="icon-btn" id="next-month" aria-label="Next month">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </div>
-
-      <div class="weekday-row" aria-hidden="true">
-        <span>M</span><span>T</span><span>W</span><span>T</span>
-        <span>F</span><span>S</span><span>S</span>
-      </div>
-      <div id="calendar-grid" class="calendar-grid" role="grid"></div>
+      <button type="button" id="today-history" class="text-btn today-history">Ee roju gnapakalu choodu <span aria-hidden="true">›</span></button>
     </section>
-
-    <section class="feed-section" aria-label="Entries">
-      <div class="feed-head">
-        <h2 id="feed-label" class="feed-label">This month</h2>
-        <button type="button" class="btn btn-quiet btn-sm" id="clear-filter" hidden>
-          Show whole month
-        </button>
-      </div>
-      <div id="feed" class="feed" aria-live="polite"></div>
+    <section id="memories-page" class="page memories-page" aria-label="Gnapakalu" hidden>
+      <h2>Mana gnapakalu.</h2><p class="page-subtitle">Chinna moments… manake sontham.</p>
+      <div class="month-nav"><button type="button" class="icon-btn" data-month-shift="-1" aria-label="Previous month"><svg class="icon"><use href="#i-left"/></svg></button><label class="month-control"><span id="memories-month-label"></span><input type="month" class="month-input" aria-label="Choose memories month"></label><button type="button" class="icon-btn" data-month-shift="1" aria-label="Next month"><svg class="icon"><use href="#i-right"/></svg></button></div>
+      <div id="author-filters" class="author-filters" role="group" aria-label="Filter by author"></div>
+      <div class="feed-head"><h3 id="feed-label" class="sr-only">This month</h3></div><div id="feed" class="feed" aria-live="polite" aria-busy="false"></div>
+      <button type="button" class="text-btn new-entry-link" id="compose-btn"><svg class="icon"><use href="#i-edit"/></svg> Oka kottha gnapakam</button>
+    </section>
+    <section id="calendar-page" class="page calendar-page" aria-label="Calendar" hidden>
+      <h2>Mana rojulu.</h2>
+      <div class="month-nav"><button type="button" class="icon-btn" data-month-shift="-1" aria-label="Previous month"><svg class="icon"><use href="#i-left"/></svg></button><label class="month-control"><span id="month-label"></span><input type="month" class="month-input" aria-label="Choose calendar month"></label><button type="button" class="icon-btn" data-month-shift="1" aria-label="Next month"><svg class="icon"><use href="#i-right"/></svg></button></div>
+      <div class="calendar-box"><div class="weekday-row" aria-hidden="true"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div><div id="calendar-grid" class="calendar-grid" role="group" aria-label="Choose a day"></div></div>
+      <div id="calendar-legend" class="calendar-legend"></div>
+      <div class="calendar-detail"><h3 id="calendar-day-label"></h3><div id="calendar-feed" class="feed" aria-live="polite"></div><button type="button" id="calendar-compose" class="text-btn new-entry-link"><svg class="icon"><use href="#i-edit"/></svg> Ee rojuki oka note</button></div>
     </section>
   </main>
-
-  <button type="button" class="fab" id="compose-btn" aria-label="Write an entry">
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5"
-            stroke-linecap="round"/>
-    </svg>
-  </button>
+  <nav class="app-nav" aria-label="Journal views"><div class="app-nav-inner">
+    <button type="button" data-view="today" class="nav-item is-active" aria-current="page"><svg class="icon"><use href="#i-today"/></svg><span>Ee roju</span></button>
+    <button type="button" data-view="memories" class="nav-item"><svg class="icon"><use href="#i-memories"/></svg><span>Gnapakalu</span></button>
+    <button type="button" data-view="calendar" class="nav-item"><svg class="icon"><use href="#i-calendar"/></svg><span>Calendar</span></button>
+  </div></nav>
 </div>
 
-<!-- Compose sheet -------------------------------------------------------- -->
-<div id="sheet-backdrop" class="sheet-backdrop" hidden>
-  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-    <div class="sheet-head">
-      <h2 id="sheet-title" class="sheet-title">New entry</h2>
-      <button type="button" class="icon-btn" id="sheet-close" aria-label="Close">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round"/>
-        </svg>
-      </button>
-    </div>
-
-    <form id="entry-form" class="entry-form">
-      <input type="hidden" id="entry-id">
-
-      <label class="field-label" for="entry-date">Date</label>
-      <input type="date" id="entry-date" required>
-
-      <label class="field-label" for="entry-title">Title <span class="optional">optional</span></label>
-      <input type="text" id="entry-title" maxlength="200" placeholder="a few words">
-
-      <label class="field-label" for="entry-body">What happened?</label>
-      <textarea id="entry-body" rows="8" maxlength="20000"
-                placeholder="Write it down before it fades..."></textarea>
-
-      <fieldset class="photo-field">
-        <legend class="field-label">Photos &amp; voice <span class="optional">up to 10</span></legend>
-        <div id="photo-strip" class="photo-strip"></div>
-        <div class="attach-actions">
-          <button type="button" class="btn btn-quiet btn-sm" id="add-photo-btn">
-            Add photos
-          </button>
-          <button type="button" class="btn btn-quiet btn-sm" id="record-btn" hidden>
-            <span class="record-dot" aria-hidden="true"></span>
-            <span id="record-label">Record a note</span>
-          </button>
-        </div>
-        <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple hidden>
-      </fieldset>
-
-      <fieldset class="mood-field">
-        <legend class="field-label">Mood <span class="optional">optional</span></legend>
-        <div id="mood-chips" class="mood-chips"></div>
-      </fieldset>
-
-      <p id="entry-error" class="error-text" role="alert" hidden></p>
-
-      <div class="sheet-actions">
-        <button type="button" class="btn btn-danger btn-sm" id="delete-btn" hidden>Delete</button>
-        <div class="sheet-actions-right">
-          <button type="button" class="btn btn-quiet" id="cancel-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div id="lightbox" class="lightbox" hidden>
-  <button type="button" class="lightbox-close icon-btn" id="lightbox-close" aria-label="Close photo">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round"/>
-    </svg>
-  </button>
-  <img id="lightbox-image" class="lightbox-image" alt="">
-</div>
-
+<div id="sheet-backdrop" class="sheet-backdrop" hidden><section class="sheet edit-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><div class="sheet-head"><h2 id="sheet-title">Edit entry</h2><button type="button" id="sheet-close" class="icon-btn" aria-label="Close editor"><svg class="icon"><use href="#i-close"/></svg></button></div><div id="editor-slot"></div></section></div>
+<div id="mood-backdrop" class="sheet-backdrop mood-backdrop" hidden><section id="mood-dialog" class="sheet mood-sheet" role="dialog" aria-modal="true" aria-labelledby="mood-dialog-title" tabindex="-1"><div class="sheet-handle" aria-hidden="true"></div><button type="button" id="mood-close" class="icon-btn dialog-close" aria-label="Close moods"><svg class="icon"><use href="#i-close"/></svg></button><h2 id="mood-dialog-title">Ee roju mood ela undi?</h2><p class="page-subtitle">Pick what feels right.</p><div id="all-moods" class="all-moods" role="group" aria-label="All moods"></div><div class="mood-dialog-actions"><button type="button" id="clear-mood" class="text-btn">Clear mood</button><button type="button" id="mood-done" class="btn btn-primary">Done</button></div></section></div>
+<div id="account-backdrop" class="sheet-backdrop" hidden><section class="sheet account-sheet" role="dialog" aria-modal="true" aria-labelledby="account-title"><div class="sheet-head"><h2 id="account-title">Mana space.</h2><button type="button" id="account-close" class="icon-btn" aria-label="Close account"><svg class="icon"><use href="#i-close"/></svg></button></div><p id="account-name"></p><button type="button" id="signout-btn" class="btn btn-quiet">Sign out</button></section></div>
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" hidden><button type="button" id="lightbox-close" class="icon-btn lightbox-close" aria-label="Close photo"><svg class="icon"><use href="#i-close"/></svg></button><img id="lightbox-image" class="lightbox-image" alt="Journal photo"></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-
-<script src="app.js"></script>
 </body>
 </html>

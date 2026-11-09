@@ -13,12 +13,12 @@
  * so the app opens offline - just from the last version actually fetched.
  */
 
-var VERSION = 'v2';
+var VERSION = 'v3-pearl';
 var SHELL_CACHE = 'mana-shell-' + VERSION;
 var ASSET_CACHE = 'mana-assets-' + VERSION;
 
-var SHELL = ['/', '/index.html', '/app.css', '/app.js'];
-var ASSETS = ['/manifest.webmanifest', '/icons/icon.svg'];
+var SHELL = ['/', '/index.html', '/app.css', '/ui.js', '/app.js'];
+var ASSETS = ['/manifest.webmanifest', '/icons/icon.svg', '/fonts/great-vibes.ttf', '/fonts/lora.ttf', '/fonts/lora-italic.ttf'];
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
@@ -91,7 +91,7 @@ self.addEventListener('fetch', function (event) {
   // cache: a stale entry would misreport what your partner wrote.
   if (url.pathname.indexOf('/api/') === 0) return;
 
-  if (url.pathname.indexOf('/icons/') === 0 || url.pathname === '/manifest.webmanifest') {
+  if (url.pathname.indexOf('/icons/') === 0 || url.pathname.indexOf('/fonts/') === 0 || url.pathname === '/manifest.webmanifest') {
     event.respondWith(cacheFirst(request, ASSET_CACHE));
     return;
   }

@@ -20,9 +20,9 @@ on:
       target:
         description: 'What to deploy'
         required: true
-        default: 'web'
+        default: 'app'
         type: choice
-        options: [web, api, all]
+        options: [app, web, api, all]
 
 permissions:
   contents: read
@@ -91,11 +91,11 @@ jobs:
               --region us-east-1 --query 'Stacks[0].StackStatus' --output text
           done
 
-      - name: Deploy
+      - name: Deploy API code, frontend and CloudFront invalidation
         env:
           PROJECT_NAME: mana-muchatlu
           DOMAIN_NAME: mana-muchatlu-shivani.prakyath.dev
           APEX_DOMAIN: prakyath.dev
         run: |
           chmod +x mana-muchatlu/infra/deploy.sh
-          ./mana-muchatlu/infra/deploy.sh "${{ inputs.target || 'web' }}"
+          ./mana-muchatlu/infra/deploy.sh "${{ inputs.target || 'app' }}"

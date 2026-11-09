@@ -19,13 +19,13 @@ the Route53 hosted zone. That isolation is deliberate — see
 |---|---|
 | Two members, passphrase sign-in | scrypt hashes, HMAC session tokens, 30-day sessions |
 | Author avatars | every entry carries its author; initials + accent colour |
-| Month calendar | one dot per person who wrote that day; tap a day to filter |
+| Three views | Ee roju composer, Gnapakalu with author filters, Monday-first Calendar |
 | Write / edit / delete | both people can edit either entry — it is one shared journal |
-| Moods | eight of them, optional |
+| Moods | twelve Tinglish choices; required on every save and edit |
 | Installable PWA | add to home screen on iOS and Android; no App Store, no `$99/yr` |
 | Photos | up to 10 per entry, uploaded straight to S3; thumbnail grid + full-screen viewer |
 | Voice notes | record in the browser, play back on the entry; same upload path as photos |
-| Dark mode | follows the system |
+| Pearl & Ink design | phone-first; blush accents, self-hosted calligraphy and serif fonts |
 | Nightly archive | full JSON snapshot to a separate bucket, verified before it is written |
 | Weekly note | one email: what you wrote, and whether the backup is healthy |
 | Offline shell | the app opens without a connection; entries still need one |
@@ -161,26 +161,33 @@ budget 5–30 minutes. Later runs take seconds.
 Afterwards:
 
 ```bash
-./deploy.sh web       # frontend only — the common case
+./deploy.sh app       # API code then frontend; keeps live environment, credentials and data
+./deploy.sh web       # frontend only
 ./deploy.sh api       # Lambda code + config only
 ./deploy.sh archive   # run the backup now and print what it wrote
 ```
 
-### Automatic frontend deployment
+### Automatic application deployment
 
-Merge journal changes into `main` to publish them automatically. The journal's
-GitHub Actions workflow runs the tests, uploads `web/` to its own S3 bucket,
-and waits for its CloudFront invalidation to finish. Pull requests run tests
-without publishing. Journal-only changes do not trigger the portfolio deploy.
+Merge journal changes into `main` to publish automatically. Pull requests run
+both journal and portfolio tests without deploying. The default `app` target
+uploads and verifies the API code, publishes `web/` to the journal bucket, then
+waits for CloudFront invalidation. Journal-only changes do not deploy the portfolio.
 
-The existing AWS credentials in repository secrets must be able to read the
-`mana-muchatlu-data` and `mana-muchatlu-web` CloudFormation stacks, sync the
-journal site bucket, and create and read CloudFront invalidations. A missing
-stack or denied permission fails the deployment instead of silently skipping it.
+Routine releases do not deploy CloudFormation, read or replace secrets, change
+Lambda environment variables, or write to DynamoDB or the media bucket. Existing
+entries and sessions stay intact. New mood choices require the updated API, so
+an API upload failure stops the release before publishing the frontend.
 
-Pushes deploy the frontend. For API or infrastructure updates, use the
-**Mana Muchatlu** workflow's **Run workflow** control on `main` and select
-`api` or `all` respectively.
+The GitHub Actions AWS credentials need CloudFormation stack reads, Lambda
+`UpdateFunctionCode` and `GetFunctionConfiguration` for `mana-muchatlu-api`,
+site-bucket sync, and CloudFront invalidation create/read permissions. A denied
+permission fails the deployment instead of silently skipping it.
+
+For deliberate environment or infrastructure changes, use **Run workflow** on
+`main` and choose `api` (code plus configuration) or `all` (infrastructure too).
+`app` is the safe default for normal releases; `web` remains available for
+frontend-only deployments.
 
 Passphrases are hashed locally with scrypt; only the hash leaves the machine.
 Nobody, including you, can recover a forgotten one — re-run `init-secrets.sh`.
@@ -201,7 +208,8 @@ binds to localhost only, and has nothing to do with the real passphrases —
 those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
-npx jest mana-muchatlu          # 132 tests (whole repo, incl. portfolio: 158)
+npm run test:journal -- --runInBand
+npm test -- --runInBand         # includes portfolio regression tests
 node scripts/make-icons.js      # regenerate app icons
 ```
 
@@ -246,16 +254,15 @@ correct resolution strategy — not CRDTs.
 Colour-coding was the original ask. Avatars are strictly better: they scale
 past two people, survive export as a plain `author` field, and do not require
 both of you to remember whose colour is whose. Accent colours are still there —
-as the avatar fill, the entry's left border, and the calendar dot.
+as the avatar outline and the calendar dot.
 
 ---
 
 ## Known gaps
 
-- **Telugu conjunct rendering is unverified on real devices.** The headless
-  browser used for testing lacks a proper Telugu font and renders
-  `ముచ్చట్లు` with broken conjuncts. This is expected to be correct on any
-  phone with Telugu support — but it has not been confirmed on a real handset.
+- **Phone rendering needs a real-device check.** The redesign uses Latin-script
+  Tinglish and local fonts. Automated DOM and validation tests pass; the managed
+  browser preview service was unreachable during this release.
 - **Session tokens live in `localStorage`**, which is readable by any script on
   the origin. There is no third-party script on this origin and no CDN
   dependency, so the exposure is small — but an httpOnly cookie would be

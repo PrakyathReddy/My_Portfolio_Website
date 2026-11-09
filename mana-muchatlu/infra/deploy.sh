@@ -3,6 +3,7 @@
 # Deploy Mana Muchatlu end to end. Idempotent - safe to re-run.
 #
 #   ./deploy.sh              full deploy (infra + api + web)
+#   ./deploy.sh app          code-only API + frontend, preserving live config and data
 #   ./deploy.sh web          frontend only (the common case while iterating)
 #   ./deploy.sh api          lambda code + config only
 #   ./deploy.sh archive      run the backup now and report what it wrote
@@ -102,7 +103,7 @@ configure_public_access() {
   return 0
 }
 
-deploy_api_code() {
+package_api_code() {
   log "Packaging API"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
   cp -r "${ROOT}/api/index.js" "${ROOT}/api/archive.js" "${ROOT}/api/lib" "$BUILD_DIR/"
@@ -115,7 +116,10 @@ deploy_api_code() {
   # starts stay in the low tens of milliseconds.
   (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js archive.js lib)
 
-  log "Uploading API code"
+}
+
+upload_api_code() {
+  log "Uploading API code (existing environment and storage unchanged)"
   aws lambda update-function-code \
     --region "$AWS_REGION" \
     --function-name "${PROJECT_NAME}-api" \
@@ -124,6 +128,17 @@ deploy_api_code() {
 
   aws lambda wait function-updated \
     --region "$AWS_REGION" --function-name "${PROJECT_NAME}-api"
+
+  local expected_hash deployed_hash
+  expected_hash="$(node -e 'const fs=require("fs"),c=require("crypto"); process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("base64"))' "${BUILD_DIR}/api.zip")"
+  deployed_hash="$(aws lambda get-function-configuration --region "$AWS_REGION" \
+    --function-name "${PROJECT_NAME}-api" --query 'CodeSha256' --output text)"
+  [ "$expected_hash" = "$deployed_hash" ] || { echo "API code verification failed; frontend was not published"; return 1; }
+}
+
+deploy_api_code() {
+  package_api_code
+  upload_api_code
 
   log "Injecting secrets from SSM into the function config"
   local session_secret members table_name media_bucket
@@ -343,6 +358,14 @@ case "$TARGET" in
     deploy_web_stack
     publish_web
     ;;
+  app)
+    # Routine application releases must never redeploy data infrastructure or
+    # overwrite the existing member hashes, session secret, or environment.
+    # New API validation is live before the corresponding UI reaches users.
+    package_api_code
+    upload_api_code
+    publish_web
+    ;;
   api)
     deploy_api_code
     configure_public_access
@@ -360,7 +383,7 @@ case "$TARGET" in
   *)
     echo
     echo "  Nothing was deployed: '${TARGET}' is not a valid target."
-    echo "  usage: $0 [all|api|web|archive|report]   (default: all)"
+    echo "  usage: $0 [app|all|api|web|archive|report]   (default: all)"
     echo
     exit 1
     ;;

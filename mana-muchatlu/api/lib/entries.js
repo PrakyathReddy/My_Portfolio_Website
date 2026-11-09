@@ -15,7 +15,8 @@
 
 const MAX_TITLE = 200;
 const MAX_BODY = 20000;
-const MOODS = ['happy', 'calm', 'grateful', 'silly', 'sad', 'tired', 'excited', 'missing-you'];
+const MOODS = ['happy', 'calm', 'grateful', 'silly', 'sad', 'tired', 'excited', 'missing-you',
+  'perfect-day', 'normal-day', 'irritated', 'overthinking'];
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
@@ -101,7 +102,9 @@ function validateEntry(input, { requireDate = true, hasMedia = false } = {}) {
   }
 
   let mood = '';
-  if (src.mood !== undefined && src.mood !== null && src.mood !== '') {
+  if (src.mood === undefined || src.mood === null || src.mood === '') {
+    errors.push('choose a mood before saving');
+  } else {
     mood = String(src.mood);
     if (!MOODS.includes(mood)) {
       errors.push(`mood must be one of: ${MOODS.join(', ')}`);
