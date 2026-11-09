@@ -1,56 +1,22 @@
-/* ===========================================================================
-   Mana Muchatlu - client
-   Vanilla JS, no build step, matching the portfolio it lives beside.
-   At this size a framework would cost more in bytes than it saves in lines.
-   =========================================================================== */
+/* Mana Muchatlu. The same private journal, with a phone-first home. */
 (function () {
   'use strict';
-
   var API = (window.MANA_CONFIG && window.MANA_CONFIG.apiBase) || '';
+  var UI = window.ManaUI;
   var TOKEN_KEY = 'mana.token';
   var MEMBER_KEY = 'mana.member';
-
-  var MOOD_GLYPHS = {
-    happy: '😊', calm: '🌿', grateful: '🙏', silly: '😜',
-    sad: '🥺', tired: '😴', excited: '✨', 'missing-you': '💌',
-  };
-
-  var state = {
-    token: null,
-    member: null,
-    members: [],
-    month: null,       // 'YYYY-MM'
-    entries: [],
-    summary: {},
-    selectedDay: null, // 'YYYY-MM-DD' or null for the whole month
-    pendingMember: null,
-    // Photos attached to the entry currently open in the compose sheet.
-    // Each: { localId, key, status: 'uploading'|'done'|'failed', previewUrl }
-    draftPhotos: [],
-  };
-
-  var MAX_PHOTOS = 10;
-
-  // MediaRecorder gives a different container per browser and will not
-  // negotiate: Chrome/Android produce webm/opus, Safari/iOS produce mp4.
-  // Ask for what this browser actually supports rather than guessing.
-  var AUDIO_TYPES = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ];
-
-  var recorder = {
-    media: null,      // MediaRecorder
-    stream: null,     // MediaStream, so the mic can be released
-    chunks: [],
-    startedAt: 0,
-    timer: null,
-  };
-
   var $ = function (id) { return document.getElementById(id); };
-
+  var state = {
+    token: null, member: null, members: [], pendingMember: null,
+    month: null, entries: [], summary: {}, selectedDay: null,
+    view: 'today', authorFilter: '', loading: false, loadError: '', loadSerial: 0,
+    draftPhotos: [], draftMood: '', saving: false, savedNewDraft: null, editBaseline: '',
+  };
+  var MAX_PHOTOS = 10;
+  var AUDIO_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  var recorder = { media: null, stream: null, chunks: [], startedAt: 0, timer: null,
+    requesting: false, stopping: false, generation: 0 };
+  var dialogFocus = {};
   /* --- Storage (never throws) ---------------------------------------------
      Private-mode Safari throws on localStorage access rather than returning
      null, so every touch is wrapped. A storage failure should cost you the
@@ -98,6 +64,7 @@
   /* --- API ----------------------------------------------------------------- */
   function api(path, options) {
     options = options || {};
+    var requestToken = state.token;
     var headers = { 'content-type': 'application/json' };
     if (state.token) headers.authorization = 'Bearer ' + state.token;
 
@@ -106,7 +73,7 @@
       headers: headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     }).then(function (res) {
-      if (res.status === 401 && state.token) {
+      if (res.status === 401 && state.token && state.token === requestToken) {
         signOut('Your session expired - sign in again');
         throw new Error('unauthorized');
       }
@@ -130,270 +97,443 @@
   }
 
   function memberById(id) {
-    for (var i = 0; i < state.members.length; i++) {
-      if (state.members[i].id === id) return state.members[i];
-    }
-    return { id: id, name: id, initials: (id || '?').slice(0, 1).toUpperCase(), accent: '#8b7355' };
+    return state.members.find(function (m) { return m.id === id; }) ||
+      { id: id, name: id || 'Us', initials: (id || '?').slice(0, 1).toUpperCase() };
   }
-
   function makeAvatar(member, extraClass) {
-    var el = document.createElement('div');
+    var el = document.createElement('span');
     el.className = 'avatar' + (extraClass ? ' ' + extraClass : '');
-    el.style.setProperty('--avatar-accent', member.accent);
-    el.textContent = member.initials;
+    el.style.setProperty('--avatar-accent', UI.accent(member));
+    el.textContent = UI.initials(member);
     el.title = member.name;
     return el;
   }
+  function icon(name) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'icon');
+    svg.setAttribute('aria-hidden', 'true');
+    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + name);
+    svg.appendChild(use);
+    return svg;
+  }
 
-  /* --- Sign in ------------------------------------------------------------- */
+  /* Dialogs keep keyboard focus in the topmost open layer. */
+  function activeDialog() {
+    return ['lightbox', 'mood-backdrop', 'account-backdrop', 'sheet-backdrop'].find(function (id) {
+      return !$(id).hidden;
+    });
+  }
+  function syncDialogState() {
+    var top = activeDialog();
+    document.body.classList.toggle('has-dialog', Boolean(top));
+    $('app-view').inert = Boolean(top);
+    ['lightbox', 'mood-backdrop', 'account-backdrop', 'sheet-backdrop'].forEach(function (id) {
+      $(id).inert = Boolean(top && top !== id);
+    });
+  }
+  function showDialog(id, focusId) {
+    dialogFocus[id] = document.activeElement;
+    $(id).hidden = false;
+    syncDialogState();
+    $(focusId).focus();
+  }
+  function hideDialog(id) {
+    $(id).hidden = true;
+    syncDialogState();
+    var previous = dialogFocus[id];
+    if (previous && previous.isConnected) previous.focus();
+    delete dialogFocus[id];
+  }
+
+  /* Sign-in: existing identities, passphrases and session keys are unchanged. */
   function renderMemberPicker() {
     var picker = $('member-picker');
     picker.textContent = '';
-
     state.members.forEach(function (member) {
       var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'member-btn';
-      btn.appendChild(makeAvatar(member));
-
+      btn.type = 'button'; btn.className = 'member-btn';
+      btn.appendChild(makeAvatar(member, 'avatar-lg'));
       var name = document.createElement('span');
-      name.className = 'member-btn-name';
-      name.textContent = member.name;
+      name.className = 'member-btn-name'; name.textContent = member.name;
       btn.appendChild(name);
-
       btn.addEventListener('click', function () {
         state.pendingMember = member;
         $('signin-name').textContent = member.name;
-        picker.hidden = true;
-        $('signin-form').hidden = false;
-        $('signin-error').hidden = true;
-        $('passphrase').focus();
+        picker.hidden = true; $('signin-form').hidden = false;
+        $('signin-error').hidden = true; $('passphrase').focus();
       });
-
       picker.appendChild(btn);
     });
   }
-
   function handleSignIn(event) {
     event.preventDefault();
     if (!state.pendingMember) return;
-
     var submit = $('signin-submit');
-    var errorEl = $('signin-error');
-    submit.disabled = true;
-    submit.textContent = 'Opening...';
-    errorEl.hidden = true;
-
-    api('/auth/login', {
-      method: 'POST',
-      body: { memberId: state.pendingMember.id, passphrase: $('passphrase').value },
-    }).then(function (data) {
-      state.token = data.token;
-      state.member = data.member;
-      store(TOKEN_KEY, data.token);
-      store(MEMBER_KEY, JSON.stringify(data.member));
-      $('passphrase').value = '';
-      showApp();
+    submit.disabled = true; submit.textContent = 'Opening…';
+    $('signin-error').hidden = true;
+    api('/auth/login', { method: 'POST', body: {
+      memberId: state.pendingMember.id, passphrase: $('passphrase').value,
+    }}).then(function (data) {
+      state.token = data.token; state.member = data.member;
+      store(TOKEN_KEY, data.token); store(MEMBER_KEY, JSON.stringify(data.member));
+      $('passphrase').value = ''; showApp();
     }).catch(function (err) {
-      errorEl.textContent = err.message;
-      errorEl.hidden = false;
+      $('signin-error').textContent = err.message; $('signin-error').hidden = false;
       $('passphrase').select();
     }).finally(function () {
-      submit.disabled = false;
-      submit.textContent = 'Open our journal';
+      submit.disabled = false; submit.textContent = 'Open our journal';
     });
   }
-
   function signOut(message) {
-    state.token = null;
-    state.member = null;
-    state.entries = [];
-    store(TOKEN_KEY, null);
-    store(MEMBER_KEY, null);
-
-    $('app-view').hidden = true;
-    $('signin-view').hidden = false;
-    $('signin-form').hidden = true;
-    $('member-picker').hidden = false;
+    state.loadSerial++;
+    state.token = null; state.member = null; state.entries = []; state.summary = {};
+    state.month = null; state.authorFilter = ''; state.pendingMember = null;
+    recorder.generation++; recorder.requesting = false;
+    if (recorder.media) { recorder.media.onstop = null; recorder.media = null; }
+    releaseMicrophone();
+    if (state.savedNewDraft) {
+      state.savedNewDraft.photos.forEach(revokePreview);
+      state.savedNewDraft = null;
+    }
+    clearDraftPhotos();
+    $('composer-home').appendChild($('entry-form'));
+    ['lightbox', 'mood-backdrop', 'account-backdrop', 'sheet-backdrop'].forEach(function (id) { $(id).hidden = true; });
+    syncDialogState();
+    resetComposer(isoDate(new Date()));
+    store(TOKEN_KEY, null); store(MEMBER_KEY, null);
+    $('app-view').hidden = true; $('signin-view').hidden = false;
+    $('signin-form').hidden = true; $('member-picker').hidden = false;
+    $('passphrase').value = '';
     if (message) toast(message);
   }
-
-  /* --- Calendar ------------------------------------------------------------ */
-  function renderCalendar() {
-    var grid = $('calendar-grid');
-    grid.textContent = '';
-    $('month-label').textContent = monthTitle(state.month);
-
-    var parts = state.month.split('-');
-    var year = Number(parts[0]);
-    var monthIndex = Number(parts[1]) - 1;
-
-    var first = new Date(year, monthIndex, 1);
-    var daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-    // JS weeks start Sunday; this calendar starts Monday.
-    var leading = (first.getDay() + 6) % 7;
-    var today = isoDate(new Date());
-
-    for (var b = 0; b < leading; b++) {
-      var blank = document.createElement('div');
-      blank.className = 'day is-blank';
-      grid.appendChild(blank);
-    }
-
-    for (var day = 1; day <= daysInMonth; day++) {
-      var date = state.month + '-' + String(day).padStart(2, '0');
-      var cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'day';
-      cell.setAttribute('role', 'gridcell');
-      if (date === today) cell.classList.add('is-today');
-      if (date === state.selectedDay) cell.classList.add('is-selected');
-
-      var num = document.createElement('span');
-      num.textContent = String(day);
-      cell.appendChild(num);
-
-      var dots = document.createElement('span');
-      dots.className = 'day-dots';
-      var summary = state.summary[date];
-      if (summary) {
-        summary.authors.forEach(function (authorId) {
-          var dot = document.createElement('span');
-          dot.className = 'dot';
-          dot.style.setProperty('--dot-accent', memberById(authorId).accent);
-          dots.appendChild(dot);
-        });
-        cell.setAttribute('aria-label', dayTitle(date) + ', ' + summary.total + ' entries');
-      } else {
-        cell.setAttribute('aria-label', dayTitle(date));
-      }
-      cell.appendChild(dots);
-
-      (function (thisDate) {
-        cell.addEventListener('click', function () {
-          state.selectedDay = state.selectedDay === thisDate ? null : thisDate;
-          renderCalendar();
-          renderFeed();
-        });
-      })(date);
-
-      grid.appendChild(cell);
-    }
+  function showApp() {
+    $('signin-view').hidden = true; $('app-view').hidden = false;
+    var copy = UI.placeholders(state.member);
+    $('entry-title').placeholder = copy.title; $('entry-body').placeholder = copy.body;
+    $('member-pair').textContent = ''; $('calendar-legend').textContent = '';
+    state.members.forEach(function (member) {
+      $('member-pair').appendChild(makeAvatar(member, member.id === state.member.id ? 'is-current' : ''));
+      var label = document.createElement('span'); label.className = 'legend-member';
+      var dot = document.createElement('i'); dot.className = 'dot';
+      dot.style.setProperty('--dot-accent', UI.accent(member));
+      label.appendChild(dot); label.appendChild(document.createTextNode(' ' + member.name));
+      $('calendar-legend').appendChild(label);
+    });
+    $('account-name').textContent = 'Signed in as ' + state.member.name;
+    $('account-btn').setAttribute('aria-label', 'Account: ' + state.member.name);
+    state.lastToday = isoDate(new Date());
+    state.month = isoMonth(new Date()); state.selectedDay = isoDate(new Date());
+    resetComposer(isoDate(new Date())); renderAuthorFilters(); setView('today'); loadMonth();
   }
 
-  /* --- Feed ---------------------------------------------------------------- */
-  function renderFeed() {
-    var feed = $('feed');
-    feed.textContent = '';
-
-    var visible = state.selectedDay
-      ? state.entries.filter(function (e) { return e.date === state.selectedDay; })
-      : state.entries;
-
-    $('feed-label').textContent = state.selectedDay
-      ? dayTitle(state.selectedDay)
-      : monthTitle(state.month);
-    $('clear-filter').hidden = !state.selectedDay;
-
-    if (!visible.length) {
-      var empty = document.createElement('div');
-      empty.className = 'empty';
-
-      var headline = document.createElement('p');
-      headline.className = 'empty-headline';
-      headline.textContent = state.selectedDay
-        ? 'Nothing written on this day'
-        : 'This month is still blank';
-      empty.appendChild(headline);
-
-      var sub = document.createElement('p');
-      sub.className = 'empty-sub';
-      sub.textContent = 'Tap + to write the first one.';
-      empty.appendChild(sub);
-
-      feed.appendChild(empty);
-      return;
+  /* Three views share a single month query; changing tabs never resets a draft. */
+  function setView(view) {
+    state.view = view;
+    ['today', 'memories', 'calendar'].forEach(function (name) { $(name + '-page').hidden = name !== view; });
+    document.querySelectorAll('[data-view]').forEach(function (button) {
+      var active = button.dataset.view === view;
+      button.classList.toggle('is-active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+  }
+  function changeMonth(month) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return;
+    state.month = month;
+    state.selectedDay = month === isoMonth(new Date()) ? isoDate(new Date()) : month + '-01';
+    loadMonth();
+  }
+  function renderAuthorFilters() {
+    var wrap = $('author-filters'); wrap.textContent = '';
+    [{ id: '', name: 'Maniddaram' }].concat(state.members).forEach(function (member) {
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'author-filter';
+      button.textContent = member.id ? UI.initials(member) : member.name;
+      button.setAttribute('aria-label', member.id ? member.name + ' entries' : 'Both of us');
+      button.setAttribute('aria-pressed', String(state.authorFilter === member.id));
+      button.addEventListener('click', function () {
+        state.authorFilter = member.id; renderAuthorFilters(); renderFeed();
+      });
+      wrap.appendChild(button);
+    });
+  }
+  function renderCalendar() {
+    var grid = $('calendar-grid'); grid.textContent = '';
+    $('month-label').textContent = monthTitle(state.month);
+    $('memories-month-label').textContent = monthTitle(state.month);
+    document.querySelectorAll('.month-input').forEach(function (input) { input.value = state.month; });
+    var parts = state.month.split('-');
+    var year = Number(parts[0]), month = Number(parts[1]) - 1;
+    var leading = (new Date(year, month, 1).getDay() + 6) % 7;
+    for (var b = 0; b < leading; b++) {
+      var blank = document.createElement('span'); blank.className = 'day is-blank'; grid.appendChild(blank);
     }
-
-    visible.forEach(function (entry) {
+    var count = new Date(year, month + 1, 0).getDate();
+    for (var day = 1; day <= count; day++) {
+      (function (date, number) {
+        var cell = document.createElement('button'); cell.type = 'button'; cell.className = 'day';
+        cell.classList.toggle('is-today', date === isoDate(new Date()));
+        cell.classList.toggle('is-selected', date === state.selectedDay);
+        cell.setAttribute('aria-pressed', String(date === state.selectedDay));
+        var num = document.createElement('span'); num.textContent = number; cell.appendChild(num);
+        var dots = document.createElement('span'); dots.className = 'day-dots'; dots.setAttribute('aria-hidden', 'true');
+        var summary = state.summary[date];
+        if (summary) (summary.authors || []).forEach(function (id) {
+          var dot = document.createElement('i'); dot.className = 'dot';
+          dot.style.setProperty('--dot-accent', UI.accent(memberById(id))); dots.appendChild(dot);
+        });
+        cell.appendChild(dots);
+        cell.setAttribute('aria-label', dayTitle(date) + (summary ? ', ' + summary.total + ' entries by ' + (summary.authors || []).map(function (id) { return memberById(id).name; }).join(' and ') : ''));
+        cell.addEventListener('click', function () {
+          state.selectedDay = date; renderCalendar(); renderCalendarFeed();
+          // Re-rendering replaced this button; keep keyboard focus on the selected day.
+          var selected = grid.querySelector('[aria-pressed="true"]');
+          if (selected) selected.focus({ preventScroll: true });
+        });
+        grid.appendChild(cell);
+      })(state.month + '-' + String(day).padStart(2, '0'), day);
+    }
+  }
+  function renderEmpty(feed, headline, detail, retry) {
+    var empty = document.createElement('div'); empty.className = 'empty';
+    var head = document.createElement('p'); head.className = 'empty-headline'; head.textContent = headline;
+    var sub = document.createElement('p'); sub.className = 'empty-sub'; sub.textContent = detail;
+    empty.appendChild(head); empty.appendChild(sub);
+    if (retry) {
+      var button = document.createElement('button'); button.type = 'button'; button.className = 'text-btn';
+      button.textContent = 'Try again'; button.addEventListener('click', loadMonth); empty.appendChild(button);
+    }
+    feed.appendChild(empty);
+  }
+  function renderFeed() {
+    var feed = $('feed'); feed.textContent = '';
+    feed.setAttribute('aria-busy', String(state.loading));
+    $('feed-label').textContent = monthTitle(state.month);
+    if (state.loading) return renderEmpty(feed, 'Gnapakalu vasthunnayi…', 'One little moment.');
+    if (state.loadError) return renderEmpty(feed, 'Couldn’t load our memories.', state.loadError, true);
+    var entries = state.entries.filter(function (entry) { return !state.authorFilter || entry.author === state.authorFilter; });
+    if (!entries.length) return renderEmpty(feed, 'Inka raayaledu.', 'Oka chinna gnapakam tho start cheddam.');
+    var previous = '';
+    entries.forEach(function (entry) {
+      if (entry.date !== previous) {
+        var heading = document.createElement('h3'); heading.className = 'date-heading'; heading.textContent = dayTitle(entry.date);
+        feed.appendChild(heading); previous = entry.date;
+      }
       feed.appendChild(renderEntry(entry));
     });
   }
-
-  function renderEntry(entry) {
+  function renderCalendarFeed() {
+    var feed = $('calendar-feed'); feed.textContent = '';
+    var date = state.selectedDay || state.month + '-01';
+    $('calendar-day-label').textContent = dayTitle(date);
+    if (state.loading) return renderEmpty(feed, 'Gnapakalu vasthunnayi…', 'One little moment.');
+    if (state.loadError) return renderEmpty(feed, 'Couldn’t load this day.', state.loadError, true);
+    var entries = state.entries.filter(function (entry) { return entry.date === date; });
+    if (!entries.length) return renderEmpty(feed, 'Ee roju inka blank.', 'Oka note raaddama?');
+    entries.forEach(function (entry) { feed.appendChild(renderEntry(entry, true)); });
+  }
+  function renderEntry(entry, compact) {
+    var card = document.createElement('article'); card.className = 'entry' + (compact ? ' is-compact' : ''); card.tabIndex = 0;
+    card.setAttribute('aria-label', 'Read or edit ' + (entry.title || 'entry') + ', ' + dayTitle(entry.date));
     var author = memberById(entry.author);
-
-    var card = document.createElement('article');
-    card.className = 'entry';
-    card.style.setProperty('--entry-accent', author.accent);
-    card.tabIndex = 0;
-
-    var head = document.createElement('div');
-    head.className = 'entry-head';
-    head.appendChild(makeAvatar(author, 'avatar-sm'));
-
-    var meta = document.createElement('div');
-    meta.className = 'entry-meta';
-
-    var name = document.createElement('div');
-    name.className = 'entry-author';
-    name.textContent = author.name;
-    meta.appendChild(name);
-
-    var when = document.createElement('div');
-    when.className = 'entry-when';
-    when.textContent = dayTitle(entry.date);
-    if (entry.updatedAt && entry.createdAt && entry.updatedAt - entry.createdAt > 1000) {
-      var edited = document.createElement('span');
-      edited.className = 'entry-edited';
-      edited.textContent = ' · edited';
-      when.appendChild(edited);
+    var head = document.createElement('div'); head.className = 'entry-head'; head.appendChild(makeAvatar(author, 'avatar-sm'));
+    var meta = document.createElement('div'); meta.className = 'entry-meta';
+    var name = document.createElement('div'); name.className = 'entry-author'; name.textContent = author.name; meta.appendChild(name);
+    var when = document.createElement('div'); when.className = 'entry-when'; when.textContent = dayTitle(entry.date);
+    if (entry.updatedAt - entry.createdAt > 1000) when.appendChild(document.createTextNode(' · edited'));
+    meta.appendChild(when); head.appendChild(meta);
+    if (entry.mood) {
+      var mood = document.createElement('span'); mood.className = 'entry-mood'; mood.textContent = UI.moodLabel(entry.mood); head.appendChild(mood);
     }
-    meta.appendChild(when);
-    head.appendChild(meta);
-
-    if (entry.mood && MOOD_GLYPHS[entry.mood]) {
-      var mood = document.createElement('span');
-      mood.className = 'entry-mood';
-      mood.textContent = MOOD_GLYPHS[entry.mood];
-      mood.title = entry.mood;
-      head.appendChild(mood);
-    }
-    card.appendChild(head);
-
+    var edit = document.createElement('button'); edit.type = 'button'; edit.className = 'icon-btn entry-edit';
+    edit.setAttribute('aria-label', 'Edit ' + (entry.title || 'entry')); edit.appendChild(icon('edit')); head.appendChild(edit); card.appendChild(head);
     if (entry.title) {
-      var title = document.createElement('h3');
-      title.className = 'entry-title';
-      // textContent, never innerHTML: entry text is user input and this is the
-      // one place a stray <script> could otherwise get a foothold.
-      title.textContent = entry.title;
-      card.appendChild(title);
+      var title = document.createElement('h3'); title.className = 'entry-title'; title.textContent = entry.title; card.appendChild(title);
     }
-
     if (entry.body) {
-      var body = document.createElement('p');
-      body.className = 'entry-body is-clamped';
-      body.textContent = entry.body;
-      card.appendChild(body);
+      var body = document.createElement('p'); body.className = 'entry-body is-clamped'; body.textContent = entry.body; card.appendChild(body);
     }
-
     if (entry.media && entry.media.length) {
-      var images = entry.media.filter(function (m) { return m.kind !== 'audio'; });
-      var audio = entry.media.filter(function (m) { return m.kind === 'audio'; });
-
-      if (images.length) card.appendChild(renderPhotoGrid(images));
-      audio.forEach(function (item) { card.appendChild(renderVoiceNote(item)); });
+      var images = entry.media.filter(function (item) { return item.kind !== 'audio'; });
+      if (images.length && !compact) card.appendChild(renderPhotoGrid(images));
+      entry.media.filter(function (item) { return item.kind === 'audio'; }).forEach(function (item) { card.appendChild(renderVoiceNote(item)); });
+      if (images.length && compact) {
+        var note = document.createElement('p'); note.className = 'entry-when'; note.textContent = images.length + ' photo' + (images.length === 1 ? '' : 's'); card.appendChild(note);
+      }
     }
-
-    function open() { openSheet(entry); }
-    card.addEventListener('click', open);
-    card.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    card.addEventListener('click', function () { openSheet(entry); });
+    card.addEventListener('keydown', function (event) {
+      if (event.target === card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openSheet(entry); }
     });
-
     return card;
   }
+  function loadMonth() {
+    var serial = ++state.loadSerial;
+    state.loading = true; state.loadError = ''; renderCalendar(); renderFeed(); renderCalendarFeed();
+    return api('/entries?month=' + encodeURIComponent(state.month)).then(function (data) {
+      if (serial !== state.loadSerial || !state.token) return;
+      state.entries = data.entries || []; state.summary = data.summary || {};
+    }).catch(function (err) {
+      if (serial === state.loadSerial && err.message !== 'unauthorized') state.loadError = err.message;
+    }).finally(function () {
+      if (serial !== state.loadSerial || !state.token) return;
+      state.loading = false; renderCalendar(); renderFeed(); renderCalendarFeed();
+    });
+  }
 
+  /* One composer, inline for today and temporarily moved into the edit dialog.
+     Its draft and attachment URLs are restored after editing another entry. */
+  function draftSnapshot() {
+    return { date: $('entry-date').value, title: $('entry-title').value,
+      body: $('entry-body').value, mood: state.draftMood, photos: state.draftPhotos };
+  }
+  function draftFingerprint() {
+    return JSON.stringify({ date: $('entry-date').value, title: $('entry-title').value,
+      body: $('entry-body').value, mood: state.draftMood,
+      media: state.draftPhotos.map(function (p) { return [p.localId, p.key, p.status]; }) });
+  }
+  function hasDraft() {
+    return Boolean($('entry-title').value.trim() || $('entry-body').value.trim() ||
+      state.draftMood || state.draftPhotos.length || recorder.requesting || isRecording() || recorder.stopping);
+  }
+  function hasPendingMedia() {
+    return recorder.requesting || isRecording() || recorder.stopping ||
+      state.draftPhotos.some(function (p) { return p.status === 'uploading'; });
+  }
+  function revokePreview(photo) {
+    if (photo.previewUrl && photo.previewUrl.indexOf('blob:') === 0) URL.revokeObjectURL(photo.previewUrl);
+  }
+  function resetComposer(date) {
+    clearDraftPhotos();
+    $('entry-id').value = ''; $('entry-date').value = date; $('entry-date').disabled = false;
+    $('entry-title').value = ''; $('entry-body').value = ''; state.draftMood = '';
+    $('delete-btn').hidden = true; $('cancel-btn').hidden = true; $('entry-error').hidden = true;
+    renderComposer();
+  }
+  function renderComposer() {
+    $('today-date').textContent = dayTitle($('entry-date').value || isoDate(new Date()));
+    renderMoodChips(); renderDraftPhotos(); updateSaveState();
+  }
+  function startNewEntry(date) {
+    if (state.saving || hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
+    if ($('entry-date').value !== date && hasDraft() && !window.confirm('Replace your unsaved draft with a note for this day?')) return;
+    if ($('entry-date').value !== date) resetComposer(date);
+    setView('today'); $('entry-body').focus();
+  }
+  function openSheet(entry) {
+    if (state.saving || hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
+    if (!$('sheet-backdrop').hidden) return;
+    state.savedNewDraft = draftSnapshot();
+    state.draftPhotos = []; // Detach; the new-entry draft still owns its object URLs.
+    $('editor-slot').appendChild($('entry-form'));
+    $('entry-id').value = entry.entryId;
+    $('entry-date').value = entry.date; $('entry-date').disabled = true;
+    $('entry-title').value = entry.title || ''; $('entry-body').value = entry.body || '';
+    state.draftMood = entry.mood || '';
+    state.draftPhotos = (entry.media || []).map(function (item, index) {
+      return { localId: 'existing' + index, key: item.key, status: 'done',
+        kind: item.kind || 'image', duration: item.duration || 0,
+        contentType: item.contentType || '', previewUrl: item.url || '' };
+    });
+    $('cancel-btn').hidden = false; $('delete-btn').hidden = false; $('entry-error').hidden = true;
+    renderComposer(); state.editBaseline = draftFingerprint();
+    showDialog('sheet-backdrop', 'entry-body');
+  }
+  function closeSheet(force) {
+    if ($('sheet-backdrop').hidden) return;
+    if (force !== true) {
+      if (state.saving || hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
+      if (draftFingerprint() !== state.editBaseline && !window.confirm('Discard your unsaved edits?')) return;
+    }
+    clearDraftPhotos();
+    $('composer-home').appendChild($('entry-form'));
+    var draft = state.savedNewDraft; state.savedNewDraft = null;
+    $('entry-id').value = ''; $('entry-date').disabled = false;
+    $('entry-date').value = draft.date; $('entry-title').value = draft.title; $('entry-body').value = draft.body;
+    state.draftMood = draft.mood; state.draftPhotos = draft.photos;
+    $('cancel-btn').hidden = true; $('delete-btn').hidden = true; $('entry-error').hidden = true;
+    renderComposer(); hideDialog('sheet-backdrop');
+  }
+  function validMood() {
+    return UI.moods.some(function (mood) { return mood.id === state.draftMood; });
+  }
+  function updateSaveState() {
+    var unfinished = hasPendingMedia();
+    var failed = state.draftPhotos.some(function (p) { return p.status === 'failed'; });
+    var content = $('entry-title').value.trim() || $('entry-body').value.trim() || state.draftPhotos.length;
+    $('save-btn').disabled = !validMood() || !content || unfinished || failed || state.saving || !$('entry-date').value;
+    $('save-btn').textContent = state.saving ? 'Saving…' : 'Save entry';
+    $('delete-btn').disabled = state.saving || unfinished;
+    $('add-photo-btn').disabled = state.saving || state.draftPhotos.length >= MAX_PHOTOS;
+    $('record-btn').disabled = state.saving || recorder.requesting || recorder.stopping || (state.draftPhotos.length >= MAX_PHOTOS && !isRecording());
+    document.querySelectorAll('.photo-remove').forEach(function (button) { button.disabled = state.saving; });
+    $('entry-title').readOnly = state.saving; $('entry-body').readOnly = state.saving;
+    $('mood-help').textContent = !validMood() ? 'Oka mood choose chesko, save cheyyadaniki.' :
+      unfinished ? 'Recording or uploading… finish before saving.' :
+      failed ? 'An attachment didn’t upload. Remove it and try again.' : 'Ee gnapakam manake sontham.';
+    $('mood-help').classList.toggle('is-required', !validMood());
+  }
+  function renderMoodChips() {
+    var quick = UI.quickMoods.slice();
+    if (state.draftMood && quick.indexOf(state.draftMood) === -1) quick.push(state.draftMood);
+    function render(wrap, ids) {
+      wrap.textContent = '';
+      ids.forEach(function (id) {
+        var chip = document.createElement('button'); chip.type = 'button'; chip.className = 'mood-chip';
+        chip.dataset.mood = id; chip.textContent = UI.moodLabel(id);
+        chip.setAttribute('aria-pressed', String(id === state.draftMood));
+        chip.disabled = state.saving;
+        chip.addEventListener('click', function () {
+          state.draftMood = id;
+          // Keep the sheet open for comparison and announce the current choice.
+          renderMoodChips(); updateSaveState();
+          var replacement = wrap.querySelector('[data-mood="' + id + '"]');
+          if (replacement) replacement.focus({ preventScroll: true });
+        });
+        wrap.appendChild(chip);
+      });
+    }
+    render($('mood-chips'), quick);
+    render($('all-moods'), UI.moods.map(function (mood) { return mood.id; }));
+  }
+  function handleSave(event) {
+    event.preventDefault();
+    if (state.saving) return;
+    if (!validMood()) { toast('Oka mood choose chesko.'); $('more-moods').focus(); return; }
+    if (hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
+    if (state.draftPhotos.some(function (p) { return p.status !== 'done'; })) { toast('Remove the failed attachment and try again.'); return; }
+    var entryId = $('entry-id').value;
+    var payload = { date: $('entry-date').value, title: $('entry-title').value,
+      body: $('entry-body').value, mood: state.draftMood, media: draftMediaKeys() };
+    var token = state.token;
+    state.saving = true; $('entry-error').hidden = true; updateSaveState(); renderMoodChips();
+    var path = entryId ? '/entries/' + payload.date + '/' + entryId : '/entries';
+    api(path, { method: entryId ? 'PATCH' : 'POST', body: payload }).then(function () {
+      if (state.token !== token) return;
+      if (entryId) closeSheet(true);
+      else {
+        resetComposer(isoDate(new Date()));
+        state.month = payload.date.slice(0, 7); state.selectedDay = payload.date;
+        state.authorFilter = ''; renderAuthorFilters(); setView('memories');
+      }
+      toast('Mana gnapakam, saved ♥');
+      return loadMonth();
+    }).catch(function (err) {
+      if (state.token !== token || err.message === 'unauthorized') return;
+      $('entry-error').textContent = err.message; $('entry-error').hidden = false;
+    }).finally(function () { state.saving = false; updateSaveState(); renderMoodChips(); });
+  }
+  function handleDelete() {
+    var id = $('entry-id').value, date = $('entry-date').value;
+    if (!id || state.saving || hasPendingMedia()) return;
+    if (!window.confirm('Delete this entry? This cannot be undone.')) return;
+    state.saving = true; updateSaveState();
+    api('/entries/' + date + '/' + id, { method: 'DELETE' }).then(function () {
+      closeSheet(true); toast('Entry deleted'); return loadMonth();
+    }).catch(function (err) { if (err.message !== 'unauthorized') toast(err.message); })
+      .finally(function () { state.saving = false; updateSaveState(); });
+  }
   /* --- Photos -------------------------------------------------------------- */
 
   function renderPhotoGrid(images) {
@@ -461,11 +601,11 @@
 
   function openLightbox(url) {
     $('lightbox-image').src = url;
-    $('lightbox').hidden = false;
+    showDialog('lightbox', 'lightbox-close');
   }
 
   function closeLightbox() {
-    $('lightbox').hidden = true;
+    hideDialog('lightbox');
     // Drop the reference so a large image is not held in memory while closed.
     $('lightbox-image').src = '';
   }
@@ -532,16 +672,15 @@
     state.draftPhotos = state.draftPhotos.filter(function (photo) {
       if (photo.localId !== localId) return true;
       // Release the object URL; the browser will not do it for us.
-      if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+      revokePreview(photo);
       return false;
     });
     renderDraftPhotos();
   }
 
   function clearDraftPhotos() {
-    state.draftPhotos.forEach(function (photo) {
-      if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
-    });
+    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+    state.draftPhotos.forEach(revokePreview);
     state.draftPhotos = [];
   }
 
@@ -587,8 +726,8 @@
       remove.type = 'button';
       remove.className = 'photo-remove';
       remove.textContent = '\u00d7';
-      remove.setAttribute('aria-label', 'Remove photo');
-      remove.addEventListener('click', function () { removeDraftPhoto(photo.localId); });
+      remove.setAttribute('aria-label', isAudio ? 'Remove voice note' : 'Remove photo');
+      remove.addEventListener('click', function () { if (!state.saving) removeDraftPhoto(photo.localId); });
       chip.appendChild(remove);
 
       strip.appendChild(chip);
@@ -596,10 +735,10 @@
 
     var remaining = MAX_PHOTOS - state.draftPhotos.length;
     $('add-photo-btn').disabled = remaining <= 0;
-    $('add-photo-btn').textContent = remaining <= 0
+    $('photo-label').textContent = remaining <= 0
       ? 'Ten attachments is the limit'
       : (state.draftPhotos.some(function (p) { return p.kind !== 'audio'; })
-          ? 'Add more' : 'Add photos');
+          ? 'Add more' : 'Photo');
 
     $('record-btn').hidden = !canRecord();
     $('record-btn').disabled = remaining <= 0 && !isRecording();
@@ -677,52 +816,39 @@
   }
 
   function startRecording() {
-    if (state.draftPhotos.length >= MAX_PHOTOS) {
-      toast('Ten attachments is the limit');
-      return;
-    }
-
+    if (state.draftPhotos.length >= MAX_PHOTOS || recorder.requesting || recorder.stopping) return;
+    recorder.requesting = true;
+    var generation = ++recorder.generation;
+    renderRecordButton();
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      if (generation !== recorder.generation || !state.token) {
+        stream.getTracks().forEach(function (track) { track.stop(); }); return;
+      }
       var mimeType = supportedAudioType();
-      recorder.stream = stream;
-      recorder.chunks = [];
-      recorder.media = mimeType
-        ? new MediaRecorder(stream, { mimeType: mimeType })
-        : new MediaRecorder(stream);
-
-      recorder.media.addEventListener('dataavailable', function (event) {
-        if (event.data && event.data.size) recorder.chunks.push(event.data);
+      recorder.stream = stream; recorder.chunks = []; recorder.requesting = false;
+      var media = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+      recorder.media = media;
+      media.addEventListener('dataavailable', function (event) {
+        if (generation === recorder.generation && event.data && event.data.size) recorder.chunks.push(event.data);
       });
-
-      recorder.media.addEventListener('stop', function () {
-        // The recorder's own mimeType is authoritative - it may differ from
-        // what we asked for.
-        var type = recorder.media.mimeType || mimeType || 'audio/webm';
-        var blob = new Blob(recorder.chunks, { type: type });
+      media.addEventListener('stop', function () {
+        if (generation !== recorder.generation) return;
+        var blob = new Blob(recorder.chunks, { type: media.mimeType || mimeType || 'audio/webm' });
         var seconds = (Date.now() - recorder.startedAt) / 1000;
-
         releaseMicrophone();
-
-        if (blob.size > 0 && seconds >= 0.5) {
-          uploadAttachment(blob, { duration: seconds, kind: 'audio' });
-        } else {
-          toast('That was too short to keep');
-        }
+        if (blob.size > 0 && seconds >= 0.5) uploadAttachment(blob, { duration: seconds, kind: 'audio' });
+        else toast('That was too short to keep');
       });
-
-      recorder.startedAt = Date.now();
-      recorder.media.start();
-      renderRecordButton();
-
+      recorder.startedAt = Date.now(); media.start(); renderRecordButton();
       recorder.timer = setInterval(renderRecordButton, 250);
     }).catch(function () {
-      // Denied, or no microphone. Either way there is nothing to retry.
-      toast('No microphone available');
+      if (generation !== recorder.generation) return;
+      releaseMicrophone(); toast('No microphone available');
     });
   }
 
   function stopRecording() {
-    if (isRecording()) recorder.media.stop();
+    if (isRecording()) { recorder.stopping = true; recorder.media.stop(); }
     clearInterval(recorder.timer);
     recorder.timer = null;
     renderRecordButton();
@@ -734,6 +860,7 @@
       recorder.stream.getTracks().forEach(function (track) { track.stop(); });
     }
     recorder.stream = null;
+    recorder.requesting = false; recorder.stopping = false;
     recorder.media = null;
     recorder.chunks = [];
     clearInterval(recorder.timer);
@@ -753,325 +880,149 @@
       button.classList.remove('is-recording');
       label.textContent = state.draftPhotos.some(function (p) { return p.kind === 'audio'; })
         ? 'Record another'
-        : 'Record a note';
+        : (recorder.requesting ? 'Opening mic…' : recorder.stopping ? 'Finishing…' : 'Voice note');
     }
+    button.disabled = state.saving || recorder.requesting || recorder.stopping || (state.draftPhotos.length >= MAX_PHOTOS && !isRecording());
+    updateSaveState();
   }
 
-  /* --- Loading ------------------------------------------------------------- */
-  function loadMonth() {
-    return api('/entries?month=' + encodeURIComponent(state.month))
-      .then(function (data) {
-        state.entries = data.entries || [];
-        state.summary = data.summary || {};
-        renderCalendar();
-        renderFeed();
-      })
-      .catch(function (err) {
-        if (err.message !== 'unauthorized') toast(err.message);
-      });
-  }
 
-  /* --- Compose sheet ------------------------------------------------------- */
-  function renderMoodChips(selected) {
-    var wrap = $('mood-chips');
-    wrap.textContent = '';
-
-    Object.keys(MOOD_GLYPHS).forEach(function (mood) {
-      var chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'mood-chip';
-      chip.dataset.mood = mood;
-      chip.textContent = MOOD_GLYPHS[mood] + ' ' + mood.replace('-', ' ');
-      chip.setAttribute('aria-pressed', String(mood === selected));
-
-      chip.addEventListener('click', function () {
-        var nowOn = chip.getAttribute('aria-pressed') !== 'true';
-        wrap.querySelectorAll('.mood-chip').forEach(function (other) {
-          other.setAttribute('aria-pressed', 'false');
-        });
-        chip.setAttribute('aria-pressed', String(nowOn));
-      });
-
-      wrap.appendChild(chip);
-    });
-  }
-
-  function selectedMood() {
-    var on = $('mood-chips').querySelector('.mood-chip[aria-pressed="true"]');
-    return on ? on.dataset.mood : '';
-  }
-
-  function openSheet(entry) {
-    var isEdit = Boolean(entry);
-
-    $('sheet-title').textContent = isEdit ? 'Edit entry' : 'New entry';
-    $('entry-id').value = isEdit ? entry.entryId : '';
-    $('entry-date').value = isEdit ? entry.date : (state.selectedDay || isoDate(new Date()));
-    $('entry-date').disabled = isEdit; // date is part of the key
-    $('entry-title').value = isEdit ? entry.title : '';
-    $('entry-body').value = isEdit ? entry.body : '';
-    renderMoodChips(isEdit ? entry.mood : '');
-
-    // Existing photos come back already uploaded, so they start as 'done'
-    // and their preview is the presigned url the API just handed us.
-    clearDraftPhotos();
-    if (isEdit && entry.media) {
-      state.draftPhotos = entry.media.map(function (item, index) {
-        return {
-          localId: 'existing' + index,
-          key: item.key,
-          status: 'done',
-          kind: item.kind || 'image',
-          duration: item.duration || 0,
-          contentType: item.contentType || '',
-          previewUrl: item.url || '',
-        };
-      });
-    }
-    renderDraftPhotos();
-
-    $('delete-btn').hidden = !isEdit;
-    $('entry-error').hidden = true;
-    $('sheet-backdrop').hidden = false;
-
-    ($('entry-title')).focus();
-  }
-
-  function closeSheet() {
-    // Leaving the mic live after the sheet closes would keep the browser's
-    // recording indicator on with nothing to show for it.
-    if (isRecording()) recorder.media.stop();
-    releaseMicrophone();
-
-    $('sheet-backdrop').hidden = true;
-    clearDraftPhotos();
-    renderDraftPhotos();
-  }
-
-  function handleSave(event) {
-    event.preventDefault();
-
-    var entryId = $('entry-id').value;
-
-    if (isRecording()) {
-      toast('Stop the recording first');
-      return;
-    }
-
-    // Saving while an attachment is still in flight would silently drop it.
-    var stillUploading = state.draftPhotos.some(function (photo) {
-      return photo.status === 'uploading';
-    });
-    if (stillUploading) {
-      toast('Still uploading - one moment');
-      return;
-    }
-
-    var payload = {
-      date: $('entry-date').value,
-      title: $('entry-title').value,
-      body: $('entry-body').value,
-      mood: selectedMood(),
-      media: draftMediaKeys(),
-    };
-
-    var errorEl = $('entry-error');
-    var saveBtn = $('save-btn');
-    errorEl.hidden = true;
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-
-    var request = entryId
-      ? api('/entries/' + payload.date + '/' + entryId, { method: 'PATCH', body: payload })
-      : api('/entries', { method: 'POST', body: payload });
-
-    request.then(function () {
-      closeSheet();
-      toast(entryId ? 'Saved' : 'Written down');
-      // The entry may belong to a month other than the one on screen.
-      var entryMonth = payload.date.slice(0, 7);
-      if (entryMonth !== state.month) state.month = entryMonth;
-      return loadMonth();
-    }).catch(function (err) {
-      if (err.message === 'unauthorized') return;
-      errorEl.textContent = err.message;
-      errorEl.hidden = false;
-    }).finally(function () {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save';
-    });
-  }
-
-  function handleDelete() {
-    var entryId = $('entry-id').value;
-    var date = $('entry-date').value;
-    if (!entryId) return;
-    if (!window.confirm('Delete this entry? This cannot be undone.')) return;
-
-    api('/entries/' + date + '/' + entryId, { method: 'DELETE' })
-      .then(function () {
-        closeSheet();
-        toast('Deleted');
-        return loadMonth();
-      })
-      .catch(function (err) {
-        if (err.message !== 'unauthorized') toast(err.message);
-      });
-  }
-
-  /* --- Views --------------------------------------------------------------- */
-  function showApp() {
-    $('signin-view').hidden = true;
-    $('app-view').hidden = false;
-
-    var avatar = $('current-avatar');
-    var member = memberById(state.member.id);
-    avatar.style.setProperty('--avatar-accent', member.accent);
-    avatar.textContent = member.initials;
-    avatar.title = 'Signed in as ' + member.name;
-
-    state.month = state.month || isoMonth(new Date());
-    loadMonth();
-  }
-
-  function showSignIn() {
-    $('signin-view').hidden = false;
-    $('app-view').hidden = true;
-  }
-
-  /* --- Wiring -------------------------------------------------------------- */
+  /* Wiring and safe PWA updates. No journal content is stored in shell caches. */
   function bindEvents() {
     $('signin-form').addEventListener('submit', handleSignIn);
     $('signin-back').addEventListener('click', function () {
-      state.pendingMember = null;
-      $('signin-form').hidden = true;
-      $('member-picker').hidden = false;
-      $('signin-error').hidden = true;
+      state.pendingMember = null; $('signin-form').hidden = true;
+      $('member-picker').hidden = false; $('signin-error').hidden = true; $('passphrase').value = '';
     });
-    $('signout-btn').addEventListener('click', function () { signOut('Signed out'); });
-
-    $('prev-month').addEventListener('click', function () {
-      state.month = monthShift(state.month, -1);
-      state.selectedDay = null;
-      loadMonth();
+    $('show-password').addEventListener('click', function () {
+      var showing = $('passphrase').type === 'password';
+      $('passphrase').type = showing ? 'text' : 'password';
+      $('show-password').textContent = showing ? 'Hide' : 'Show';
+      $('show-password').setAttribute('aria-label', (showing ? 'Hide' : 'Show') + ' passphrase');
     });
-    $('next-month').addEventListener('click', function () {
-      state.month = monthShift(state.month, 1);
-      state.selectedDay = null;
-      loadMonth();
+    $('account-btn').addEventListener('click', function () { showDialog('account-backdrop', 'account-close'); });
+    $('signout-btn').addEventListener('click', function () {
+      if (state.saving || hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
+      if (hasDraft() && !window.confirm('Sign out and discard your unsaved draft?')) return;
+      signOut('Signed out');
     });
-    $('clear-filter').addEventListener('click', function () {
-      state.selectedDay = null;
-      renderCalendar();
-      renderFeed();
+    document.querySelectorAll('[data-view]').forEach(function (button) {
+      button.addEventListener('click', function () { setView(button.dataset.view); });
     });
-
-    $('compose-btn').addEventListener('click', function () { openSheet(null); });
-    $('sheet-close').addEventListener('click', closeSheet);
-    $('cancel-btn').addEventListener('click', closeSheet);
+    document.querySelectorAll('[data-month-shift]').forEach(function (button) {
+      button.addEventListener('click', function () { changeMonth(monthShift(state.month, Number(button.dataset.monthShift))); });
+    });
+    document.querySelectorAll('.month-input').forEach(function (input) {
+      input.addEventListener('change', function () { changeMonth(input.value); });
+    });
+    $('today-history').addEventListener('click', function () {
+      state.month = $('entry-date').value.slice(0, 7); state.selectedDay = $('entry-date').value;
+      setView('calendar'); loadMonth();
+    });
+    $('compose-btn').addEventListener('click', function () { startNewEntry(isoDate(new Date())); });
+    $('calendar-compose').addEventListener('click', function () { startNewEntry(state.selectedDay || state.month + '-01'); });
+    $('sheet-close').addEventListener('click', function () { closeSheet(false); });
+    $('cancel-btn').addEventListener('click', function () { closeSheet(false); });
     $('delete-btn').addEventListener('click', handleDelete);
     $('entry-form').addEventListener('submit', handleSave);
-
-    $('add-photo-btn').addEventListener('click', function () { $('photo-input').click(); });
+    ['entry-title', 'entry-body'].forEach(function (id) { $(id).addEventListener('input', updateSaveState); });
+    $('entry-date').addEventListener('change', function () {
+      if ($('entry-date').value) $('today-date').textContent = dayTitle($('entry-date').value);
+      updateSaveState();
+    });
+    $('more-moods').addEventListener('click', function () { showDialog('mood-backdrop', 'mood-close'); });
+    $('clear-mood').addEventListener('click', function () {
+      if (state.saving) return;
+      state.draftMood = ''; renderMoodChips(); updateSaveState();
+    });
+    ['mood-close', 'mood-done'].forEach(function (id) { $(id).addEventListener('click', function () { hideDialog('mood-backdrop'); }); });
+    $('account-close').addEventListener('click', function () { hideDialog('account-backdrop'); });
+    $('add-photo-btn').addEventListener('click', function () { if (!state.saving) $('photo-input').click(); });
     $('photo-input').addEventListener('change', handlePhotoPick);
-
     $('record-btn').addEventListener('click', function () {
-      if (isRecording()) stopRecording();
-      else startRecording();
+      if (state.saving || recorder.requesting || recorder.stopping) return;
+      if (isRecording()) stopRecording(); else startRecording();
     });
-
     $('lightbox-close').addEventListener('click', closeLightbox);
-    $('lightbox').addEventListener('click', function (e) {
-      if (e.target === $('lightbox')) closeLightbox();
+    ['lightbox', 'sheet-backdrop', 'mood-backdrop', 'account-backdrop'].forEach(function (id) {
+      $(id).addEventListener('click', function (event) {
+        if (event.target !== $(id)) return;
+        if (id === 'lightbox') closeLightbox();
+        else if (id === 'sheet-backdrop') closeSheet(false);
+        else hideDialog(id);
+      });
     });
-
-    $('sheet-backdrop').addEventListener('click', function (e) {
-      if (e.target === $('sheet-backdrop')) closeSheet();
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Escape') return;
-      // Topmost layer first: the lightbox sits above the compose sheet.
-      if (!$('lightbox').hidden) return closeLightbox();
-      if (!$('sheet-backdrop').hidden) closeSheet();
-    });
-
-    // Refresh on return rather than polling. At ~10 entries a week, a socket
-    // would hold a connection open for an event that fires twice a day.
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden && state.token) loadMonth();
-    });
-  }
-
-  /* --- Boot ---------------------------------------------------------------- */
-  function init() {
-    bindEvents();
-
-    if (!API) {
-      showSignIn();
-      toast('config.js is missing - run infra/deploy.sh');
-      return;
-    }
-
-    api('/members').then(function (data) {
-      state.members = data.members || [];
-      renderMemberPicker();
-
-      var token = recall(TOKEN_KEY);
-      var savedMember = recall(MEMBER_KEY);
-      if (token && savedMember) {
-        try {
-          state.token = token;
-          state.member = JSON.parse(savedMember);
-          showApp();
-          return;
-        } catch (e) { /* fall through to sign-in */ }
+    document.addEventListener('keydown', function (event) {
+      var id = activeDialog(); if (!id) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (id === 'lightbox') closeLightbox();
+        else if (id === 'sheet-backdrop') closeSheet(false);
+        else hideDialog(id);
       }
-      showSignIn();
-    }).catch(function () {
-      showSignIn();
-      toast('Cannot reach the journal right now');
+      if (event.key === 'Tab') {
+        var controls = Array.prototype.filter.call($(id).querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), audio[controls], [tabindex="0"]'), function (el) {
+          return !el.hidden && !el.closest('[hidden]') && el.type !== 'hidden';
+        });
+        if (!controls.length) return;
+        var first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || !$(id).contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || !$(id).contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+      }
     });
-
-    registerServiceWorker();
+    window.addEventListener('beforeunload', function (event) {
+      if (state.token && (hasDraft() || state.savedNewDraft || state.saving)) {
+        event.preventDefault(); event.returnValue = '';
+      }
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && state.token && !state.saving) {
+        var today = isoDate(new Date());
+        if (today !== state.lastToday && !hasDraft() && $('sheet-backdrop').hidden && $('entry-date').value === state.lastToday) resetComposer(today);
+        state.lastToday = today; loadMonth();
+      }
+    });
   }
-
-  /* Register the worker, and reload once when a new one takes over.
-   *
-   * Without this, a browser that has already opened the app keeps running the
-   * old page until it is closed and reopened - which for an installed PWA can
-   * be weeks. The guard on `hadController` means this only fires when one
-   * worker replaces another, never on a first install, where a reload would
-   * just be a visible flicker for no gain. */
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-
-    var hadController = Boolean(navigator.serviceWorker.controller);
-    var reloading = false;
-
+    var hadController = Boolean(navigator.serviceWorker.controller), reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadController || reloading) return;
-      reloading = true;
-      window.location.reload();
+      // Never trade an unsaved memory for a fresh shell.
+      if (hasDraft() || state.savedNewDraft || state.saving) {
+        toast('An update is ready. Reopen after saving your entry.'); return;
+      }
+      reloading = true; window.location.reload();
     });
-
     navigator.serviceWorker.register('sw.js').then(function (registration) {
-      // Ask explicitly rather than relying on the browser's own update
-      // heuristics, which are throttled and vary between engines. An
-      // installed PWA can sit for weeks without a cold start, so the
-      // foreground check is what actually delivers updates in practice.
-      registration.update().catch(function () { /* offline: try again later */ });
-
+      registration.update().catch(function () {});
       document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) {
-          registration.update().catch(function () { /* non-fatal */ });
-        }
+        if (!document.hidden) registration.update().catch(function () {});
       });
-    }).catch(function () { /* non-fatal */ });
+    }).catch(function () {});
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  function init() {
+    bindEvents(); resetComposer(isoDate(new Date()));
+    if (!API) { $('signin-view').hidden = false; toast('Cannot connect to the journal. Try again shortly.'); return; }
+    api('/members').then(function (data) {
+      state.members = data.members || []; renderMemberPicker();
+      var token = recall(TOKEN_KEY), saved = recall(MEMBER_KEY);
+      if (token && saved) {
+        try {
+          var member = JSON.parse(saved);
+          if (member && state.members.some(function (m) { return m.id === member.id; })) {
+            state.token = token; state.member = memberById(member.id); showApp(); return;
+          }
+        } catch (e) { /* fall through to sign-in */ }
+      }
+      $('signin-view').hidden = false;
+    }).catch(function () {
+      $('signin-view').hidden = false;
+      $('signin-error').textContent = 'Cannot reach our journal. Please refresh to try again.';
+      $('signin-error').hidden = false;
+    });
+    registerServiceWorker();
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();

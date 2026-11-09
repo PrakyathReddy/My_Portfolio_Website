@@ -19,9 +19,9 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-const PAPER = [0xf7, 0xf3, 0xee];
-const LEFT = [0x4a, 0x6f, 0xa5];  // Prakyath
-const RIGHT = [0xc2, 0x84, 0x7a]; // Shivani
+const PAPER = [0xfb, 0xf8, 0xf7];
+const LEFT = [0x44, 0x36, 0x3c];  // Prakyath
+const RIGHT = [0xb7, 0x7f, 0x90]; // Shivani
 const SS = 4;                     // supersampling factor for anti-aliasing
 
 // --- PNG encoding ------------------------------------------------------------
@@ -142,9 +142,9 @@ function drawIcon(size, inset) {
 }
 
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mana Muchatlu">
-  <rect width="512" height="512" fill="#f7f3ee"/>
-  <circle cx="205" cy="256" r="123" fill="#4a6fa5"/>
-  <circle cx="307" cy="256" r="123" fill="#c2847a" opacity="0.85"/>
+  <rect width="512" height="512" fill="#fbf8f7"/>
+  <circle cx="205" cy="256" r="123" fill="#44363c"/>
+  <circle cx="307" cy="256" r="123" fill="#b77f90" opacity="0.85"/>
 </svg>
 `;
 

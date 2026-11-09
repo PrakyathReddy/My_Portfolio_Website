@@ -19,7 +19,7 @@ Approved by the user on 2026-11-09. Build and deploy is authorized.
 | Signed-in member | Title placeholder | Body placeholder |
 | --- | --- | --- |
 | Shivani / bujjuluu / bujji | Emaina sare, I’ll always love you, bujji ♥️🫂 | idi mana safe space bujji… judgement-free. Emaina raskovachu |
-| Prakyath / bangaram | Emaina sare, I’ll always love you, bangaaramm ♥️🫂 | idi mana safe space Bangaaramm… judgement-free. Emaina raskovachu |
+| Prakyath / bangaram / live ID bangarammm | Emaina sare, I’ll always love you, bangaaramm ♥️🫂 | idi mana safe space Bangaaramm… judgement-free. Emaina raskovachu |
 
 - Tinglish UI: Ee roju ela gadichindi? / Mana gnapakalu. / Chinna moments…
   manake sontham. / Maniddaram / Mana rojulu. / Ee rojuki oka note.
@@ -50,4 +50,14 @@ Deployment must upload API code before frontend code: new moods are not accepted
 by the old Lambda. Use existing AWS resources and secrets, without deploying
 CloudFormation or resetting credentials. Keep portfolio deployment exclusions.
 
-Initial checkpoint: source reviewed; implementation and tests pending.
+Implementation checkpoint: all three views, personalised placeholders, twelve
+moods, media handling and safe code-only deployment implemented. Live public
+`/members` confirms IDs `bangarammm` and `bujjuluu`; aliases are covered by tests.
+
+Validation: full suite passed 186 tests before final polish. DOM flow checks
+cover returning sessions, mandatory mood, old mood-less entries, editing with
+original date/ID/author/media, draft restoration, filters and calendar dots.
+Mocked deployment checks prove no data/config writes and no frontend publishing
+if the API upload fails. Fonts are local with OFL licenses. Browser QA could not
+run: `sites-preview` reported running, but its URL and local port refused the
+connection; preview stopped. CI, PR merge and production verification pending.

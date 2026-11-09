@@ -98,8 +98,8 @@ describe('validateEntry', () => {
   });
 
   test('accepts a body with no title, and a title with no body', () => {
-    expect(entries.validateEntry({ body: 'just a thought', date: '2026-09-15' }).ok).toBe(true);
-    expect(entries.validateEntry({ title: 'just a title', date: '2026-09-15' }).ok).toBe(true);
+    expect(entries.validateEntry({ mood: 'happy', body: 'just a thought', date: '2026-09-15' }).ok).toBe(true);
+    expect(entries.validateEntry({ mood: 'happy', title: 'just a title', date: '2026-09-15' }).ok).toBe(true);
   });
 
   test('rejects a completely empty entry', () => {
@@ -110,7 +110,7 @@ describe('validateEntry', () => {
 
   test('accepts an entry that is only photos', () => {
     // The cheapest entry to make, and so the one most likely to get made.
-    const result = entries.validateEntry({ date: '2026-09-15' }, { hasMedia: true });
+    const result = entries.validateEntry({ date: '2026-09-15', mood: 'happy' }, { hasMedia: true });
     expect(result.ok).toBe(true);
     expect(result.value.title).toBe('');
     expect(result.value.body).toBe('');
@@ -127,15 +127,15 @@ describe('validateEntry', () => {
 
   test('whitespace-only text is fine when a photo carries the entry', () => {
     expect(entries.validateEntry(
-      { title: '   ', body: '  ', date: '2026-09-15' },
+      { title: '   ', body: '  ', date: '2026-09-15', mood: 'happy' },
       { hasMedia: true }
     ).ok).toBe(true);
   });
 
   test('requires a valid date', () => {
-    expect(entries.validateEntry({ body: 'hi' }).ok).toBe(false);
-    expect(entries.validateEntry({ body: 'hi', date: '2026-02-30' }).ok).toBe(false);
-    expect(entries.validateEntry({ body: 'hi' }, { requireDate: false }).ok).toBe(true);
+    expect(entries.validateEntry({ body: 'hi', mood: 'happy' }).ok).toBe(false);
+    expect(entries.validateEntry({ body: 'hi', mood: 'happy', date: '2026-02-30' }).ok).toBe(false);
+    expect(entries.validateEntry({ body: 'hi', mood: 'happy' }, { requireDate: false }).ok).toBe(true);
   });
 
   test('enforces length limits', () => {
@@ -156,14 +156,26 @@ describe('validateEntry', () => {
   test('accepts content exactly at the limit', () => {
     expect(entries.validateEntry({
       title: 'x'.repeat(entries.MAX_TITLE),
+      mood: 'happy',
       date: '2026-09-15',
     }).ok).toBe(true);
   });
 
-  test('rejects an unknown mood but allows none at all', () => {
+  test('rejects unknown moods', () => {
     expect(entries.validateEntry({ body: 'hi', date: '2026-09-15', mood: 'hangry' }).ok).toBe(false);
-    expect(entries.validateEntry({ body: 'hi', date: '2026-09-15', mood: '' }).ok).toBe(true);
-    expect(entries.validateEntry({ body: 'hi', date: '2026-09-15' }).value.mood).toBe('');
+  });
+
+  test.each([undefined, null, ''])('requires an explicit mood (%s)', (mood) => {
+    const result = entries.validateEntry({ body: 'hi', date: '2026-09-15', mood });
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('choose a mood before saving');
+    expect(entries.validateEntry({ date: '2026-09-15', mood }, { hasMedia: true }).ok).toBe(false);
+    expect(entries.validateEntry({ body: 'editing', mood }, { requireDate: false }).ok).toBe(false);
+  });
+
+  test.each(entries.MOODS)('accepts current and original saved mood %s', (mood) => {
+    expect(entries.validateEntry({ body: 'hi', date: '2026-09-15', mood }).value.mood).toBe(mood);
+    expect(entries.validateEntry({ date: '2026-09-15', mood }, { hasMedia: true }).ok).toBe(true);
   });
 
   test('never throws, whatever it is handed', () => {
@@ -179,7 +191,7 @@ describe('validateEntry', () => {
         fc.date({ min: new Date('2000-01-01'), max: new Date('2099-12-31'), noInvalidDate: true }),
         (body, d) => {
           const iso = d.toISOString().slice(0, 10);
-          const result = entries.validateEntry({ body, date: iso });
+          const result = entries.validateEntry({ body, date: iso, mood: 'calm' });
           // Empty-after-trim bodies are legitimately rejected; ignore those.
           if (!result.ok) return body.trim().length === 0;
           return result.value.date === iso;
@@ -205,6 +217,15 @@ describe('toPublicEntry', () => {
     expect(published).not.toHaveProperty('sk');
     expect(published.author).toBe('shivani');
     expect(published.entryId).toBe('e1');
+  });
+
+  test('reads legacy entries without mood or media without changing their identity or content', () => {
+    const legacy = { pk: 'COUPLE#mana', sk: 'ENTRY#2026-09-15#old-id', entryId: 'old-id',
+      date: '2026-09-15', title: 'Original', body: 'Our words', author: 'shivani', createdAt: 100, updatedAt: 100 };
+    const before = JSON.stringify(legacy);
+    expect(entries.toPublicEntry(legacy)).toEqual({ entryId: 'old-id', date: '2026-09-15',
+      title: 'Original', body: 'Our words', author: 'shivani', createdAt: 100, updatedAt: 100, mood: '', media: [] });
+    expect(JSON.stringify(legacy)).toBe(before);
   });
 
   test('returns null for a missing item', () => {
