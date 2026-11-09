@@ -24,9 +24,12 @@ on:
         type: choice
         options: [web, api, all]
 
+permissions:
+  contents: read
+
 concurrency:
   # Never let two deploys race for the same bucket.
-  group: journal-deploy-${{ github.ref }}
+  group: journal-production-deploy
   cancel-in-progress: false
 
 jobs:
@@ -78,34 +81,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Check whether the stacks have been bootstrapped
-        id: check
-        # First-time setup needs ./init-secrets.sh, which is interactive by
-        # design - passphrases should be typed by a person, not sat in CI
-        # secrets. So until a human has bootstrapped, this job reports that
-        # plainly and succeeds. A merge should not fail CI for the entirely
-        # expected reason that the infrastructure does not exist yet.
+      - name: Verify access to the existing journal stacks
+        # The live journal is already bootstrapped. A missing stack or denied
+        # AWS permission must fail this run instead of reporting a skipped
+        # deployment as a success.
         run: |
-          ready=true
           for stack in mana-muchatlu-data mana-muchatlu-web; do
-            if ! aws cloudformation describe-stacks --stack-name "$stack" \
-                 --region us-east-1 >/dev/null 2>&1; then
-              echo "::notice::Stack $stack not found - skipping deploy."
-              ready=false
-            fi
+            aws cloudformation describe-stacks --stack-name "$stack" \
+              --region us-east-1 --query 'Stacks[0].StackStatus' --output text
           done
-          echo "ready=$ready" >> "$GITHUB_OUTPUT"
-
-      - name: Explain what to do next
-        if: steps.check.outputs.ready != 'true'
-        run: |
-          echo "::notice::Mana Muchatlu is not deployed yet. To bootstrap it, run"
-          echo "::notice::  cd mana-muchatlu/infra && ./init-secrets.sh && ./deploy.sh"
-          echo "::notice::from a machine with AWS credentials. Once both stacks"
-          echo "::notice::exist, pushes to main will deploy the frontend automatically."
 
       - name: Deploy
-        if: steps.check.outputs.ready == 'true'
         env:
           PROJECT_NAME: mana-muchatlu
           DOMAIN_NAME: mana-muchatlu-shivani.prakyath.dev

@@ -265,13 +265,20 @@ deploy_web_stack() {
 }
 
 publish_web() {
-  local api_endpoint site_bucket distribution_id
+  local api_endpoint site_bucket distribution_id invalidation_id
   api_endpoint="$(stack_output "$DATA_STACK" ApiEndpoint)"
   site_bucket="$(stack_output "$WEB_STACK" SiteBucketName)"
   distribution_id="$(stack_output "$WEB_STACK" DistributionId)"
 
-  [ -n "$api_endpoint" ] || { echo "data stack not deployed yet"; exit 1; }
-  [ -n "$site_bucket" ] || { echo "web stack not deployed yet"; exit 1; }
+  [ -n "$api_endpoint" ] && [ "$api_endpoint" != "None" ] || {
+    echo "data stack has no API endpoint"; exit 1;
+  }
+  [ -n "$site_bucket" ] && [ "$site_bucket" != "None" ] || {
+    echo "web stack has no site bucket"; exit 1;
+  }
+  [ -n "$distribution_id" ] && [ "$distribution_id" != "None" ] || {
+    echo "web stack has no CloudFront distribution"; exit 1;
+  }
 
   log "Writing config.js"
   # Generated, not committed: the endpoint is an output of the data stack, so
@@ -290,10 +297,15 @@ EOF
     --cache-control 'public, max-age=300'
 
   log "Invalidating CloudFront"
-  aws cloudfront create-invalidation \
+  invalidation_id="$(aws cloudfront create-invalidation \
     --distribution-id "$distribution_id" \
     --paths '/*' \
-    --output text --query 'Invalidation.Id'
+    --output text --query 'Invalidation.Id')"
+
+  log "Waiting for CloudFront invalidation ${invalidation_id}"
+  aws cloudfront wait invalidation-completed \
+    --distribution-id "$distribution_id" \
+    --id "$invalidation_id"
 
   log "Live at https://${DOMAIN_NAME}"
 }

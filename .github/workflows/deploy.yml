@@ -3,36 +3,55 @@ name: Deploy to Amazon S3
 on:
   push:
     branches:
-      - main # this triggers the action whenever I push to main branch
+      - main
+    paths-ignore:
+      - 'mana-muchatlu/**'
+      - '.github/workflows/deploy-journal.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portfolio-production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. checkout code from the repository
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    
-    # 2. login to aws using secrets added in settings
-    - name: Configure AWS Credentials 
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # 3. Sync files to S3 bucket
-    #    mana-muchatlu/* is the private journal app - it deploys to its own
-    #    bucket via deploy-journal.yml and must never land in this public bucket.
-    - name: Sync to S3
-      run: |
-        aws s3 sync . s3://my-devops-portfolio-website --delete \
-          --exclude ".git/*" \
-          --exclude ".github/*" \
-          --exclude "mana-muchatlu/*" \
-          --exclude "node_modules/*" \
-          --exclude "__tests__/*" \
-          --exclude ".kiro/*" \
-          --exclude ".vscode/*" \
-          --exclude ".DS_Store"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Sync website to S3
+        run: |
+          aws s3 sync . s3://my-devops-portfolio-website \
+            --delete \
+            --exclude ".git/*" \
+            --exclude ".github/*" \
+            --exclude "mana-muchatlu/*" \
+            --exclude "node_modules/*" \
+            --exclude "__tests__/*" \
+            --exclude ".kiro/*" \
+            --exclude ".vscode/*" \
+            --exclude ".DS_Store"
+
+      - name: Invalidate CloudFront cache
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          if [ -z "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+            echo "::warning::CLOUDFRONT_DISTRIBUTION_ID is not configured. S3 deployment succeeded, but CloudFront cache was not invalidated."
+            exit 0
+          fi
+
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*"

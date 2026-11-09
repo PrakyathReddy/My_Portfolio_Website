@@ -166,6 +166,22 @@ Afterwards:
 ./deploy.sh archive   # run the backup now and print what it wrote
 ```
 
+### Automatic frontend deployment
+
+Merge journal changes into `main` to publish them automatically. The journal's
+GitHub Actions workflow runs the tests, uploads `web/` to its own S3 bucket,
+and waits for its CloudFront invalidation to finish. Pull requests run tests
+without publishing. Journal-only changes do not trigger the portfolio deploy.
+
+The existing AWS credentials in repository secrets must be able to read the
+`mana-muchatlu-data` and `mana-muchatlu-web` CloudFormation stacks, sync the
+journal site bucket, and create and read CloudFront invalidations. A missing
+stack or denied permission fails the deployment instead of silently skipping it.
+
+Pushes deploy the frontend. For API or infrastructure updates, use the
+**Mana Muchatlu** workflow's **Run workflow** control on `main` and select
+`api` or `all` respectively.
+
 Passphrases are hashed locally with scrypt; only the hash leaves the machine.
 Nobody, including you, can recover a forgotten one — re-run `init-secrets.sh`.
 
