@@ -73,3 +73,21 @@ test('signing out while the permission prompt is pending cannot register a devic
   expect(manager.subscribe).not.toHaveBeenCalled();
   expect(request.mock.calls.some(([route]) => route === '/notifications/subscribe')).toBe(false);
 });
+
+test('a previously allowed native subscription is restored if local preference storage was cleared', async () => {
+  permission.permission = 'granted'; manager.getSubscription.mockResolvedValue(sub);
+  client.signedIn(); await flush();
+  expect(request).toHaveBeenCalledWith('/notifications/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+  expect(document.getElementById('reminders-toggle').textContent).toBe('Turn off reminders');
+  expect(permission.requestPermission).not.toHaveBeenCalled();
+});
+test('the allowed opt-in is saved before server registration finishes, so an interrupted setup can recover', async () => {
+  let finish;
+  const normal = request.getMockImplementation();
+  request.mockImplementation((...args) => args[0] === '/notifications/subscribe' ? new Promise(resolve => { finish = resolve; }) : normal(...args));
+  client.signedIn(); await flush(); document.getElementById('reminders-toggle').click(); await flush();
+  expect(localStorage.getItem('mana.reminders.enabled')).toBe('true');
+  expect(finish).toEqual(expect.any(Function));
+  finish({ enabled: true }); await flush();
+  expect(document.getElementById('reminders-toggle').textContent).toBe('Turn off reminders');
+});

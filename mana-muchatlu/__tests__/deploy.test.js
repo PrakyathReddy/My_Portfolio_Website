@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-function release(failApi, failSchedule = false) {
+function release(failApi, failSchedule = false, conflictOperator = '') {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-release-test-'));
   const root = path.join(temp, 'journal');
   fs.mkdirSync(path.join(root, 'infra'), { recursive: true });
@@ -21,6 +21,8 @@ const fs=require('fs'),c=require('crypto'); const a=process.argv.slice(2);
 fs.appendFileSync(process.env.RELEASE_LOG,JSON.stringify(a)+'\\n');
 if(a[0]==='lambda'&&a[1]==='update-function-code'&&process.env.FAIL_API==='1')process.exit(42);
 if(a[0]==='lambda'&&a[1]==='get-function-configuration')console.log(a.includes('FunctionArn')?'arn:aws:lambda:us-east-1:123456789012:function:mana-muchatlu-api':c.createHash('sha256').update(fs.readFileSync(process.env.RELEASE_ZIP)).digest('base64'));
+if(a[0]==='lambda'&&a[1]==='add-permission'&&process.env.CONFLICT_OPERATOR){process.stderr.write('ResourceConflictException');process.exit(255);}
+if(a[0]==='lambda'&&a[1]==='get-policy')console.log(JSON.stringify({Statement:[{Sid:'ManaNightlyReminder',Principal:{Service:'events.amazonaws.com'},Action:'lambda:InvokeFunction',Condition:{[process.env.CONFLICT_OPERATOR]:{'AWS:SourceArn':'arn:aws:events:us-east-1:123456789012:rule/mana-muchatlu-nightly-reminder'}}}]}));
 if(a[0]==='events'){
  if(process.env.FAIL_SCHEDULE==='1')process.exit(43);
  if(a[1]==='put-rule')console.log('arn:aws:events:us-east-1:123456789012:rule/mana-muchatlu-nightly-reminder');
@@ -47,7 +49,7 @@ const root=a[a.indexOf('--prefix')+1];fs.mkdirSync(path.join(root,'node_modules'
   const log = path.join(temp, 'calls.jsonl');
   const result = spawnSync('bash', [path.join(root, 'infra/deploy.sh'), 'app'], {
     encoding: 'utf8', env: { ...process.env, PATH: path.join(temp, 'bin') + ':' + process.env.PATH,
-      RELEASE_LOG: log, RELEASE_ZIP: path.join(root, '.build/api.zip'), FAIL_API: failApi ? '1' : '0', FAIL_SCHEDULE: failSchedule ? '1' : '0' },
+      RELEASE_LOG: log, RELEASE_ZIP: path.join(root, '.build/api.zip'), FAIL_API: failApi ? '1' : '0', FAIL_SCHEDULE: failSchedule ? '1' : '0', CONFLICT_OPERATOR: conflictOperator },
   });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : [];
   fs.rmSync(temp, { recursive: true, force: true });
@@ -81,4 +83,11 @@ test('schedule configuration failure stops before frontend publishing', () => {
   const { result, calls } = release(false, true);
   expect(result.status).toBe(43);
   expect(calls.some(c => c[0] === 's3' || c[0] === 'cloudfront')).toBe(false);
+});
+
+test.each(['ArnLike', 'StringLike'])('repeat releases validate an existing scoped %s permission without widening it', operator => {
+  const { result, calls } = release(false, false, operator);
+  expect(result.status).toBe(0);
+  expect(calls.some(c => c[1] === 'get-policy')).toBe(true);
+  expect(calls.some(c => c[0] === 's3' && c[1] === 'sync')).toBe(true);
 });
