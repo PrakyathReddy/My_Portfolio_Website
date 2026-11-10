@@ -31,8 +31,9 @@ if ! aws lambda add-permission --region "$AWS_REGION" --function-name "$FUNCTION
   node - "$TEMP_DIR/policy.json" "$rule_arn" <<'JS'
 const fs = require('fs');
 const statement = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).Statement.find(s => s.Sid === 'ManaNightlyReminder');
+const sourceArn = ['ArnLike', 'ArnEquals', 'StringLike', 'StringEquals'].map(operator => statement?.Condition?.[operator]?.['AWS:SourceArn']).find(Boolean);
 if (!statement || statement.Principal?.Service !== 'events.amazonaws.com' || statement.Action !== 'lambda:InvokeFunction' ||
-    statement.Condition?.ArnLike?.['AWS:SourceArn'] !== process.argv[3]) throw new Error('Existing reminder permission has an unexpected scope');
+    sourceArn !== process.argv[3]) throw new Error('Existing reminder permission has an unexpected scope');
 JS
 fi
 

@@ -15,8 +15,9 @@
     function preference(value) {
       try {
         if (value !== undefined) win.localStorage.setItem(preferenceKey, String(value));
-        return win.localStorage.getItem(preferenceKey) === 'true';
-      } catch (_) { return value === true; }
+        // A native subscription is itself evidence of prior consent if storage was cleared.
+        return win.localStorage.getItem(preferenceKey) !== 'false';
+      } catch (_) { return value !== false; }
     }
     function render() {
       if (!$('reminders-toggle')) return;
@@ -86,6 +87,8 @@
           message = allowed === 'denied' ? 'Notifications are blocked. Allow them in your phone’s Notifications settings.' : 'Reminders stay off until you allow notifications.';
           return;
         }
+        // Persist the allowed opt-in before async setup, so closing the app mid-request is recoverable.
+        preference(true);
         registration = await registrationReady();
         subscription = await registration.pushManager.getSubscription();
         if (subscription && !keyMatches(subscription)) {
@@ -102,7 +105,9 @@
         if (serial !== generation) return;
         preference(true); enabled = true; mode = 'on'; message = ''; notify('Nightly nudges on ♥ 9:30 PM IST');
       } catch (_) {
-        if (created && subscription) { try { await subscription.unsubscribe(); } catch (_) {} subscription = null; }
+        if (created && subscription) {
+          try { await subscription.unsubscribe(); subscription = null; preference(false); } catch (_) {}
+        }
         if (serial !== generation) return;
         enabled = false; mode = 'error'; message = 'Couldn’t enable reminders. Check your connection and try again.';
       } finally { if (serial === generation) { busy = false; render(); } }
