@@ -13,11 +13,11 @@
  * so the app opens offline - just from the last version actually fetched.
  */
 
-var VERSION = 'v3-pearl';
+var VERSION = 'v4-reminders';
 var SHELL_CACHE = 'mana-shell-' + VERSION;
 var ASSET_CACHE = 'mana-assets-' + VERSION;
 
-var SHELL = ['/', '/index.html', '/app.css', '/ui.js', '/app.js'];
+var SHELL = ['/', '/index.html', '/app.css', '/ui.js', '/reminders.js', '/app.js'];
 var ASSETS = ['/manifest.webmanifest', '/icons/icon.svg', '/fonts/great-vibes.ttf', '/fonts/lora.ttf', '/fonts/lora-italic.ttf'];
 
 self.addEventListener('install', function (event) {
@@ -97,4 +97,24 @@ self.addEventListener('fetch', function (event) {
   }
 
   event.respondWith(networkFirst(request, SHELL_CACHE));
+});
+
+// Always show a visible notification; no journal entries or media are in the payload.
+self.addEventListener('push', function (event) {
+  var payload;
+  try { payload = event.data ? event.data.json() : {}; } catch (_) { payload = {}; }
+  var title = payload.kind === 'journal-reminder' ? String(payload.title || 'Mana Muchatlu ♥') : 'Mana Muchatlu ♥';
+  var body = payload.kind === 'journal-reminder' ? String(payload.body || 'It’s journal time ♥') : 'It’s journal time ♥';
+  event.waitUntil(self.registration.showNotification(title, {
+    body: body, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+    tag: payload.tag || 'mana-journal-reminder', renotify: false,
+    data: { url: '/' },
+  }));
+});
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (windows) {
+    var sameOrigin = windows.find(function (client) { return new URL(client.url).origin === self.location.origin; });
+    return sameOrigin ? sameOrigin.focus() : self.clients.openWindow('/');
+  }));
 });

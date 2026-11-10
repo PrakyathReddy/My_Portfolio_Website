@@ -16,7 +16,7 @@
 const MAX_TITLE = 200;
 const MAX_BODY = 20000;
 const MOODS = ['happy', 'calm', 'grateful', 'silly', 'sad', 'tired', 'excited', 'missing-you',
-  'perfect-day', 'normal-day', 'irritated', 'overthinking'];
+  'perfect-day', 'normal-day', 'irritated', 'overthinking', 'hectic', 'romantic', 'angry'];
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;

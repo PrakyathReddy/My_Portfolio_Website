@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const auth = require('../api/lib/auth');
 const entries = require('../api/lib/entries');
 const mediaLib = require('../api/lib/media');
+const reminderLib = require('../api/lib/reminders');
 
 const PORT = Number(process.env.PORT || 4173);
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -39,6 +40,8 @@ const MEMBERS = auth.parseMembers(JSON.stringify([
 
 /** sortKey -> item. Mirrors the single-table layout, minus the network. */
 const table = new Map();
+const pushDevices = new Map();
+const devVapid = reminderLib.vapidKeys(SESSION_SECRET, 'mana', 'https://mana-muchatlu-shivani.prakyath.dev');
 
 /**
  * Local stand-in for the media bucket.
@@ -126,6 +129,39 @@ async function handleApi(req, res, url) {
       member: auth.publicMembers([member])[0],
       expiresIn: auth.TOKEN_TTL_SECONDS,
     });
+  }
+
+  if (p.startsWith('/api/notifications/')) {
+    const member = requireSession(req, res);
+    if (!member) return undefined;
+    if (req.method === 'GET' && p === '/api/notifications/config') {
+      return sendJson(res, 200, { publicKey: devVapid.publicKey, schedule: reminderLib.SCHEDULE, messageCount: reminderLib.MESSAGES.length });
+    }
+    if (req.method !== 'POST') return sendJson(res, 404, { error: 'no such route' });
+    const body = await readBody(req);
+    if (!body) return sendJson(res, 400, { error: 'body was not valid JSON' });
+    if (p === '/api/notifications/subscribe') {
+      const check = reminderLib.validateSubscription(body.subscription);
+      if (!check.ok) return sendJson(res, 400, { error: check.error });
+      pushDevices.set(check.value.endpoint, { memberId: member.id, subscription: check.value });
+      return sendJson(res, 200, { enabled: true, schedule: reminderLib.SCHEDULE });
+    }
+    if (p === '/api/notifications/unsubscribe') {
+      pushDevices.delete(body.endpoint); return sendJson(res, 200, { enabled: false });
+    }
+    if (p === '/api/notifications/test') {
+      const device = pushDevices.get(body.endpoint);
+      if (!device || device.memberId !== member.id) return sendJson(res, 404, { error: 'enable reminders on this device first' });
+      const payload = { ...reminderLib.reminder(member, Date.now()), tag: 'mana-reminder-test',
+        body: 'It’s journal time ♥ Test reminder vachindi! Daily 9:30 PM ki kaluddam.' };
+      try {
+        await (await import('web-push')).sendNotification(device.subscription, JSON.stringify(payload), {
+          vapidDetails: { subject: 'https://mana-muchatlu-shivani.prakyath.dev', ...devVapid }, TTL: 3600, timeout: 3000,
+        });
+        return sendJson(res, 200, { sent: true });
+      } catch (_) { return sendJson(res, 502, { error: 'could not deliver the test notification' }); }
+    }
+    return sendJson(res, 404, { error: 'no such route' });
   }
 
   if (req.method === 'GET' && p === '/api/entries') {

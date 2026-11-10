@@ -17,6 +17,7 @@
   var recorder = { media: null, stream: null, chunks: [], startedAt: 0, timer: null,
     requesting: false, stopping: false, generation: 0 };
   var dialogFocus = {};
+  var reminders = null;
   /* --- Storage (never throws) ---------------------------------------------
      Private-mode Safari throws on localStorage access rather than returning
      null, so every touch is wrapped. A storage failure should cost you the
@@ -187,6 +188,7 @@
   }
   function signOut(message) {
     state.loadSerial++;
+    if (reminders) reminders.signedOut();
     state.token = null; state.member = null; state.entries = []; state.summary = {};
     state.month = null; state.authorFilter = ''; state.pendingMember = null;
     recorder.generation++; recorder.requesting = false;
@@ -225,6 +227,7 @@
     state.lastToday = isoDate(new Date());
     state.month = isoMonth(new Date()); state.selectedDay = isoDate(new Date());
     resetComposer(isoDate(new Date())); renderAuthorFilters(); setView('today'); loadMonth();
+    if (reminders) reminders.signedIn();
   }
 
   /* Three views share a single month query; changing tabs never resets a draft. */
@@ -456,7 +459,8 @@
     renderComposer(); hideDialog('sheet-backdrop');
   }
   function validMood() {
-    return UI.moods.some(function (mood) { return mood.id === state.draftMood; });
+    return UI.moods.some(function (mood) { return mood.id === state.draftMood; }) ||
+      (Boolean($('entry-id').value) && (UI.legacyMoods || []).indexOf(state.draftMood) !== -1);
   }
   function updateSaveState() {
     var unfinished = hasPendingMedia();
@@ -900,11 +904,13 @@
       $('show-password').textContent = showing ? 'Hide' : 'Show';
       $('show-password').setAttribute('aria-label', (showing ? 'Hide' : 'Show') + ' passphrase');
     });
-    $('account-btn').addEventListener('click', function () { showDialog('account-backdrop', 'account-close'); });
+    $('account-btn').addEventListener('click', function () { showDialog('account-backdrop', 'account-close'); if (reminders) reminders.refresh(); });
     $('signout-btn').addEventListener('click', function () {
       if (state.saving || hasPendingMedia()) { toast('Finish the recording or upload first.'); return; }
       if (hasDraft() && !window.confirm('Sign out and discard your unsaved draft?')) return;
-      signOut('Signed out');
+      if (reminders && reminders.isBusy()) { toast('Finish the reminder update first.'); return; }
+      if (reminders) reminders.disable().catch(function () {}).finally(function () { signOut('Signed out'); });
+      else signOut('Signed out');
     });
     document.querySelectorAll('[data-view]').forEach(function (button) {
       button.addEventListener('click', function () { setView(button.dataset.view); });
@@ -989,7 +995,7 @@
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadController || reloading) return;
       // Never trade an unsaved memory for a fresh shell.
-      if (hasDraft() || state.savedNewDraft || state.saving) {
+      if (hasDraft() || state.savedNewDraft || state.saving || (reminders && reminders.isBusy())) {
         toast('An update is ready. Reopen after saving your entry.'); return;
       }
       reloading = true; window.location.reload();
@@ -1002,7 +1008,9 @@
     }).catch(function () {});
   }
   function init() {
-    bindEvents(); resetComposer(isoDate(new Date()));
+    bindEvents();
+    if (window.ManaReminders) { reminders = window.ManaReminders.create({ request: api, notify: toast }); reminders.bind(); }
+    resetComposer(isoDate(new Date()));
     if (!API) { $('signin-view').hidden = false; toast('Cannot connect to the journal. Try again shortly.'); return; }
     api('/members').then(function (data) {
       state.members = data.members || []; renderMemberPicker();

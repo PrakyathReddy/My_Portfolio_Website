@@ -20,7 +20,16 @@ test('matches configured names as well as opaque IDs, without guessing unknown i
   expect(UI.identity({ id: 'notshivani', name: 'Another member' })).toBe('');
 });
 test('every visible mood is accepted by the API and retains all original IDs', () => {
-  expect(new Set(UI.moods.map(m => m.id))).toEqual(new Set(MOODS));
+  expect(new Set([...UI.moods.map(m => m.id), ...UI.legacyMoods])).toEqual(new Set(MOODS));
   expect(UI.moodLabel('sad')).toBe('Badhestundi');
   expect(UI.quickMoods).toEqual(['perfect-day', 'normal-day', 'sad']);
+});
+
+test('replaces the selectable Allari mood while preserving old saved labels', () => {
+  expect(UI.moods).not.toContainEqual({ id: 'silly', label: 'Allari mood' });
+  expect(UI.moodLabel('silly')).toBe('Allari mood');
+  expect(UI.moods).toEqual(expect.arrayContaining([
+    { id: 'hectic', label: 'Hectic ga' }, { id: 'romantic', label: 'Romantic ga' }, { id: 'angry', label: 'Kopam ga' },
+  ]));
+  expect(UI.moods).toHaveLength(14);
 });
