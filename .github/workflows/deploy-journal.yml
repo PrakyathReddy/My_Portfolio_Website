@@ -46,7 +46,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm ci --omit=dev --prefix mana-muchatlu --no-audit --no-fund
 
       - name: Run journal tests
         # The API's pure logic - auth, validation, key construction - is what
@@ -62,6 +64,7 @@ jobs:
         run: |
           bash -n mana-muchatlu/infra/deploy.sh
           bash -n mana-muchatlu/infra/init-secrets.sh
+          bash -n mana-muchatlu/infra/configure-reminders.sh
 
   deploy:
     needs: test

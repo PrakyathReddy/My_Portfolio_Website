@@ -21,13 +21,14 @@ the Route53 hosted zone. That isolation is deliberate — see
 | Author avatars | every entry carries its author; initials + accent colour |
 | Three views | Ee roju composer, Gnapakalu with author filters, Monday-first Calendar |
 | Write / edit / delete | both people can edit either entry — it is one shared journal |
-| Moods | twelve Tinglish choices; required on every save and edit |
+| Moods | fourteen choices; Hectic ga, Romantic ga and Kopam ga; required before saving |
 | Installable PWA | add to home screen on iOS and Android; no App Store, no `$99/yr` |
 | Photos | up to 10 per entry, uploaded straight to S3; thumbnail grid + full-screen viewer |
 | Voice notes | record in the browser, play back on the entry; same upload path as photos |
 | Pearl & Ink design | phone-first; blush accents, self-hosted calligraphy and serif fonts |
 | Nightly archive | full JSON snapshot to a separate bucket, verified before it is written |
 | Weekly note | one email: what you wrote, and whether the backup is healthy |
+| Nightly reminders | opt in per phone; 9:30 PM IST; 60 playful messages without repeating for 60 days |
 | Offline shell | the app opens without a connection; entries still need one |
 
 ## Not built yet
@@ -171,7 +172,7 @@ Afterwards:
 
 Merge journal changes into `main` to publish automatically. Pull requests run
 both journal and portfolio tests without deploying. The default `app` target
-uploads and verifies the API code, publishes `web/` to the journal bucket, then
+uploads and verifies the API code, configures the nightly reminder rule, publishes `web/` to the journal bucket, then
 waits for CloudFront invalidation. Journal-only changes do not deploy the portfolio.
 
 Routine releases do not deploy CloudFormation, read or replace secrets, change
@@ -181,7 +182,9 @@ an API upload failure stops the release before publishing the frontend.
 
 The GitHub Actions AWS credentials need CloudFormation stack reads, Lambda
 `UpdateFunctionCode` and `GetFunctionConfiguration` for `mana-muchatlu-api`,
-site-bucket sync, and CloudFront invalidation create/read permissions. A denied
+site-bucket sync, and CloudFront invalidation create/read permissions. Reminders also
+need EventBridge PutRule/DescribeRule/PutTargets/ListTargetsByRule and Lambda
+AddPermission/GetPolicy/InvokeFunction for the existing API and named reminder rule. A denied
 permission fails the deployment instead of silently skipping it.
 
 For deliberate environment or infrastructure changes, use **Run workflow** on
@@ -208,6 +211,7 @@ binds to localhost only, and has nothing to do with the real passphrases —
 those live in SSM and are set by `init-secrets.sh`.
 
 ```bash
+npm ci --omit=dev --prefix mana-muchatlu  # run from repository root
 npm run test:journal -- --runInBand
 npm test -- --runInBand         # includes portfolio regression tests
 node scripts/make-icons.js      # regenerate app icons
@@ -270,3 +274,43 @@ as the avatar outline and the calendar dot.
   cleanly.
 - **`--delete` on the media bucket is never used**, but the site bucket sync
   does use it. Media and entries are in different buckets for this reason.
+
+## Nightly Home Screen reminders
+
+Open the installed journal, sign in, tap the lock icon, then **Enable reminders**
+and allow the phone's notification prompt. Enable it separately on each phone.
+**Send a test notification** checks delivery immediately. Turn reminders off in
+the same panel; explicitly signing out also unsubscribes that phone. An expired
+login session does not cancel a reminder the device previously opted into.
+
+Delivery is scheduled daily for **21:30 Asia/Kolkata** (16:00 UTC), including days
+on which an entry was already saved. Sixty distinct templates rotate by India
+calendar date across month/year boundaries. Shivani receives “ve”/“bujji” copy;
+Prakyath receives “ra”/“bangaaramm”. Journal content and media never enter a
+notification. There are no entry/partner-update notifications.
+
+`api/lib/reminders.js` holds the messages, time/identity policy, endpoint/key
+validation and stable HKDF-derived VAPID key pair. Only the public VAPID key is
+returned to the browser; the existing high-entropy session secret and private
+key remain server-only. Rotating the session secret also rotates VAPID and
+requires each phone to re-enable reminders. `web-push` is pinned and bundled;
+there is no external paid notification service or Apple developer membership.
+
+Subscriptions and delivery leases use the separate `REMINDERS#mana` partition
+in the existing private table. Entry keys, entries and archive queries remain
+unchanged. Consistent reads plus conditional leases/last-delivered dates prevent
+duplicate nightly sends; 404/410 endpoints are removed and transient failures
+can retry. Expired scheduled events are skipped after fifteen minutes. The
+service worker shows a visible notification and focuses the existing journal
+without reloading an unsaved draft when tapped.
+
+`infra/configure-reminders.sh` idempotently configures a single private
+EventBridge-to-Lambda permission and schedule, verifies the target, and probes
+the real packaged runtime without sending a push. A failure stops the release
+before frontend publishing. It does not update the data CloudFormation stack,
+reset credentials or send the existing weekly email. Phone settings, Focus mode,
+connectivity and the operating system can affect the exact delivery time.
+
+Old `silly` mood entries retain their original **Allari mood** display label;
+new entries select **Hectic ga** (`hectic`), **Romantic ga** (`romantic`) or
+**Kopam ga** (`angry`) alongside the remaining choices.

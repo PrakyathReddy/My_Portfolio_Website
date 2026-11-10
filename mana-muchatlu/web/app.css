@@ -228,3 +228,10 @@ to{opacity:1;transform:none}
 }
 @keyframes pulse{50%{opacity:.4}
 }
+
+.reminder-settings{border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);padding:22px 0;margin:22px 0}
+.reminder-settings h3{margin:0 0 7px;font-size:23px}
+.reminder-time{font-size:14px;color:var(--soft);margin:0 0 10px}
+.reminder-description{font:italic 14px/1.6 var(--serif);color:var(--soft);margin:0 0 14px}
+.reminder-status{font-size:13px;line-height:1.6;margin:0 0 16px}
+.reminder-settings .text-btn{display:block;margin:8px auto 0}

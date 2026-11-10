@@ -45,7 +45,7 @@ stack_output() {
 }
 
 require_tools() {
-  for tool in aws node zip; do
+  for tool in aws node npm zip; do
     command -v "$tool" >/dev/null || { echo "required tool not found: $tool"; exit 1; }
   done
   aws sts get-caller-identity >/dev/null || { echo "AWS credentials not configured"; exit 1; }
@@ -106,15 +106,12 @@ configure_public_access() {
 package_api_code() {
   log "Packaging API"
   rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
-  cp -r "${ROOT}/api/index.js" "${ROOT}/api/archive.js" "${ROOT}/api/lib" "$BUILD_DIR/"
+  cp -r "${ROOT}/api/index.js" "${ROOT}/api/archive.js" "${ROOT}/api/notifications.js" "${ROOT}/api/lib" "$BUILD_DIR/"
 
-  # One bundle, two handlers: the API and the archive share every lib they use,
-  # so shipping them together keeps the two from drifting apart.
-  #
-  # No node_modules: the handlers use only Node built-ins plus the AWS SDK
-  # that the Lambda runtime already ships. The artifact is a few KB, so cold
-  # starts stay in the low tens of milliseconds.
-  (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js archive.js lib)
+  # Bundle the pinned Web Push implementation; the AWS SDK remains runtime-provided.
+  npm ci --omit=dev --prefix "$ROOT" --no-audit --no-fund
+  cp -r "${ROOT}/node_modules" "$BUILD_DIR/"
+  (cd "$BUILD_DIR" && zip -qr "${BUILD_DIR}/api.zip" index.js archive.js notifications.js lib node_modules)
 
 }
 
@@ -354,6 +351,7 @@ case "$TARGET" in
     deploy_data_stack
     deploy_api_code
     configure_public_access
+    bash "${HERE}/configure-reminders.sh"
     verify_archive
     deploy_web_stack
     publish_web
@@ -364,11 +362,13 @@ case "$TARGET" in
     # New API validation is live before the corresponding UI reaches users.
     package_api_code
     upload_api_code
+    bash "${HERE}/configure-reminders.sh"
     publish_web
     ;;
   api)
     deploy_api_code
     configure_public_access
+    bash "${HERE}/configure-reminders.sh"
     verify_archive
     ;;
   archive)

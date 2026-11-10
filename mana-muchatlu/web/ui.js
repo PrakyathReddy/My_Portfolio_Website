@@ -11,7 +11,9 @@
     { id: 'calm', label: 'Peaceful ga undi' },
     { id: 'grateful', label: 'Grateful' },
     { id: 'excited', label: 'Excited' },
-    { id: 'silly', label: 'Allari mood' },
+    { id: 'hectic', label: 'Hectic ga' },
+    { id: 'romantic', label: 'Romantic ga' },
+    { id: 'angry', label: 'Kopam ga' },
     { id: 'tired', label: 'Tired ga undi' },
     { id: 'sad', label: 'Badhestundi' },
     { id: 'irritated', label: 'Chirakuga undi' },
@@ -38,13 +40,13 @@
   }
   function moodLabel(id) {
     var mood = moods.find(function (item) { return item.id === id; });
-    return mood ? mood.label : String(id || '');
+    return mood ? mood.label : id === 'silly' ? 'Allari mood' : String(id || '');
   }
   function accent(member) { return identity(member) === 'shivani' ? '#b77f90' : '#44363c'; }
   function initials(member) {
     var person = identity(member);
     return person === 'shivani' ? 'S' : person === 'prakyath' ? 'P' : (member.initials || '?');
   }
-  return { moods: moods, quickMoods: ['perfect-day', 'normal-day', 'sad'], identity: identity,
+  return { legacyMoods: ['silly'], moods: moods, quickMoods: ['perfect-day', 'normal-day', 'sad'], identity: identity,
     placeholders: placeholders, moodLabel: moodLabel, accent: accent, initials: initials };
 });

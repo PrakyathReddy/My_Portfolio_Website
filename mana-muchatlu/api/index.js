@@ -25,6 +25,7 @@ const {
   DeleteItemCommand,
 } = require('@aws-sdk/client-dynamodb');
 
+const { createNotifications } = require('./notifications');
 const auth = require('./lib/auth');
 const entries = require('./lib/entries');
 const mediaLib = require('./lib/media');
@@ -47,6 +48,9 @@ const MEDIA_URL_TTL = 3600;
 // the Function URL's Cors config is the single place CORS is decided.
 
 const ddb = new DynamoDBClient({});
+const notifications = createNotifications({ ddb, commands: { QueryCommand, UpdateItemCommand, DeleteItemCommand },
+  tableName: TABLE_NAME, coupleId: COUPLE_ID, members: MEMBERS, secret: SESSION_SECRET,
+  origin: process.env.ALLOWED_ORIGIN || 'https://mana-muchatlu-shivani.prakyath.dev' });
 
 /**
  * CORS is owned entirely by the Function URL's own Cors configuration (see
@@ -62,6 +66,18 @@ const ddb = new DynamoDBClient({});
  * service without invoking this function at all.
  */
 exports.handler = async (event) => {
+  // Direct IAM invocations only. A Function URL request wraps user JSON in body
+  // and always has requestContext, so public callers cannot trigger a job.
+  if (!event.requestContext && event.job === 'reminder-health') {
+    await import('web-push');
+    return { ok: true, ...notifications.config() };
+  }
+  const reminderRule = (process.env.AWS_LAMBDA_FUNCTION_NAME || 'mana-muchatlu-api').replace(/-api$/, '') + '-nightly-reminder';
+  if (!event.requestContext && event.source === 'aws.events' && event['detail-type'] === 'Scheduled Event' &&
+      (event.resources || []).some(arn => String(arn).endsWith(':rule/' + reminderRule))) {
+    // Throw delivery failures so Lambda/EventBridge retry, rather than returning HTTP 500.
+    return notifications.nightly(event);
+  }
   const method = methodOf(event);
   const path = pathOf(event);
 
@@ -82,7 +98,8 @@ exports.handler = async (event) => {
 
 async function route(method, path, event) {
   if (method === 'GET' && path === '/health') {
-    return json(200, { ok: true, service: 'mana-muchatlu', members: MEMBERS.length });
+    return json(200, { ok: true, service: 'mana-muchatlu', members: MEMBERS.length,
+      reminders: { time: '21:30', timeZone: 'Asia/Kolkata', messageCount: 60 } });
   }
 
   if (method === 'GET' && path === '/members') {
@@ -102,6 +119,16 @@ async function route(method, path, event) {
   if (!member) {
     // Token is validly signed but names someone no longer on the member list.
     return json(401, { error: 'sign in first' });
+  }
+
+  if (method === 'GET' && path === '/notifications/config') return json(200, notifications.config());
+  if (method === 'POST' && ['/notifications/subscribe', '/notifications/unsubscribe', '/notifications/test'].includes(path)) {
+    const parsed = parseBody(event);
+    if (!parsed.ok) return json(400, { error: parsed.error });
+    const result = path.endsWith('/subscribe') ? await notifications.subscribe(member, parsed.value.subscription) :
+      path.endsWith('/unsubscribe') ? await notifications.unsubscribe(parsed.value.endpoint) :
+      await notifications.test(member, parsed.value.endpoint);
+    return json(result.status, result.data);
   }
 
   if (method === 'GET' && path === '/entries') {

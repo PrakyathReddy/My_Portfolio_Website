@@ -1,5 +1,10 @@
 {
   "name": "mana-muchatlu",
   "private": true,
-  "scripts": { "dev": "node scripts/dev-server.js" }
+  "scripts": {
+    "dev": "node scripts/dev-server.js"
+  },
+  "dependencies": {
+    "web-push": "4.0.0"
+  }
 }

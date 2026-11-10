@@ -101,7 +101,7 @@ test('real UI flow: required moods, placeholders, filters, immutable edit identi
   expect($('save-btn').disabled).toBe(true); // Old mood-less record can be read; an edit needs a mood.
   input('entry-body', 'Our edited words');
   click('#more-moods');
-  expect($('all-moods').children).toHaveLength(12);
+  expect($('all-moods').children).toHaveLength(14);
   click('#all-moods [data-mood="missing-you"]');
   click('#mood-done');
   expect($('save-btn').disabled).toBe(false);

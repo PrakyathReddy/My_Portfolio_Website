@@ -5,7 +5,15 @@ AI — can resume without re-deriving what took a long debugging session to
 learn the first time. `README.md` is the user-facing document; this one is the
 working context.
 
-Last updated: 2026-09-16. Branch: `claude/compassionate-euler-02gjq8`.
+Last updated: 2026-11-10. Current work: `codex/journal-nightly-reminders`.
+
+The Pearl & Ink three-page redesign is deployed on main (PR #2). The current
+release adds opt-in 21:30 Asia/Kolkata reminders with sixty templates and three
+mood changes. The API now bundles pinned `web-push`; read README's nightly
+reminder section before changing deployment or session-secret handling. Entries
+are still in the original partition; reminder subscriptions use REMINDERS#mana.
+The safe release target is `./deploy.sh app`; do not run `all` merely for code.
+222 tests pass locally before final browser/CI/release checks.
 
 ---
 
@@ -14,8 +22,7 @@ Last updated: 2026-09-16. Branch: `claude/compassionate-euler-02gjq8`.
 A private shared journal for two people, live at
 `https://mana-muchatlu-shivani.prakyath.dev`. It lives inside a portfolio
 website repo but deploys to entirely separate AWS resources. Vanilla
-HTML/CSS/JS frontend with no build step, two Node Lambdas with **zero runtime
-dependencies**, one DynamoDB table, three S3 buckets, CloudFormation for
+HTML/CSS/JS frontend with no build step, two Node Lambdas with the bundled **web-push** runtime dependency, one DynamoDB table, three S3 buckets, CloudFormation for
 everything. Built for two users and roughly ten entries a week — nearly every
 design decision follows from that number, so check it before proposing
 anything that assumes scale.
@@ -25,7 +32,8 @@ anything that assumes scale.
 ```bash
 # from the repo root
 npm install
-npx jest mana-muchatlu        # 132 tests. Whole repo (incl. portfolio) is 158.
+npm ci --omit=dev --prefix mana-muchatlu
+npx jest mana-muchatlu
 npm run dev:journal           # http://localhost:4173, both members sign in with "test"
 
 cd mana-muchatlu/infra
